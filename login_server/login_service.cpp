@@ -1,0 +1,30 @@
+#include "login_server/login_service.h"
+
+namespace login_server {
+
+LoginService::LoginService(auth::AccountRepository& account_repository, session::SessionRepository& session_repository)
+    : account_repository_(account_repository), session_repository_(session_repository) {}
+
+LoginResponse LoginService::Login(const LoginRequest& request) {
+    const auto account = account_repository_.FindByName(request.account_name);
+    if (!account.has_value()) {
+        return LoginResponse{false, "account not found", {}, 0};
+    }
+
+    if (!account->enabled) {
+        return LoginResponse{false, "account disabled", {}, 0};
+    }
+
+    if (account->password != request.password) {
+        return LoginResponse{false, "invalid password", {}, 0};
+    }
+
+    auto response = LoginResponse{};
+    response.success = true;
+    response.default_player_id = account->default_player_id;
+    response.session = session_repository_.Create(account->account_id, account->default_player_id);
+    return response;
+}
+
+}  // namespace login_server
+
