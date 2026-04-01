@@ -1,23 +1,34 @@
 #include "common/config/simple_config.h"
+#include "common/error/error_code.h"
 #include "common/log/logger.h"
-#include "game_server/player/in_memory_player_repository.h"
+#include "common/mysql/mysql_client.h"
+#include "common/redis/redis_client.h"
+#include "dungeon_server/dungeon/dungeon_service.h"
+#include "dungeon_server/dungeon/in_memory_dungeon_config_repository.h"
+#include "dungeon_server/dungeon/mysql_dungeon_repository.h"
+#include "dungeon_server/dungeon/redis_battle_context_repository.h"
+#include "game_server/player/mysql_player_repository.h"
 #include "game_server/player/player_service.h"
-#include "login_server/auth/in_memory_account_repository.h"
+#include "game_server/player/redis_player_cache_repository.h"
+#include "login_server/auth/mysql_account_repository.h"
 #include "login_server/login_service.h"
-#include "login_server/session/in_memory_session_repository.h"
+#include "login_server/session/redis_session_repository.h"
 
 #include <cstdint>
 #include <sstream>
 #include <string>
+#include <vector>
 
 namespace {
 
 struct DemoOptions {
     std::string login_config = "configs/login_server.conf";
     std::string game_config = "configs/game_server.conf";
+    std::string dungeon_config = "configs/dungeon_server.conf";
     std::string account_name = "demo";
     std::string password = "demo123";
-    std::int64_t player_id_override = 0;
+    bool reset_demo_state = true;
+    bool run_negative_cases = true;
 };
 
 DemoOptions ParseOptions(int argc, char* argv[]) {
@@ -29,12 +40,16 @@ DemoOptions ParseOptions(int argc, char* argv[]) {
             options.login_config = argv[++index];
         } else if (arg == "--game-config" && index + 1 < argc) {
             options.game_config = argv[++index];
+        } else if (arg == "--dungeon-config" && index + 1 < argc) {
+            options.dungeon_config = argv[++index];
         } else if (arg == "--account" && index + 1 < argc) {
             options.account_name = argv[++index];
         } else if (arg == "--password" && index + 1 < argc) {
             options.password = argv[++index];
-        } else if (arg == "--player-id" && index + 1 < argc) {
-            options.player_id_override = std::stoll(argv[++index]);
+        } else if (arg == "--no-reset") {
+            options.reset_demo_state = false;
+        } else if (arg == "--happy-path-only") {
+            options.run_negative_cases = false;
         }
     }
 
@@ -50,6 +65,69 @@ bool LoadConfig(const std::string& path, common::config::SimpleConfig& config) {
     return false;
 }
 
+std::string FormatError(common::error::ErrorCode code, const std::string& message) {
+    std::ostringstream output;
+    output << "error_code=" << common::error::ToString(code);
+    if (!message.empty()) {
+        output << ", message=" << message;
+    }
+    return output.str();
+}
+
+void ResetDemoState(common::mysql::MySqlClient& mysql_client,
+                    common::redis::RedisClient& redis_client,
+                    const common::config::SimpleConfig& game_config,
+                    const common::config::SimpleConfig& dungeon_config,
+                    std::int64_t account_id,
+                    std::int64_t player_id) {
+    const auto dungeon_id = dungeon_config.GetInt("demo.dungeon_id", 1001);
+
+    mysql_client.Execute("DELETE FROM reward_log WHERE player_id = " + std::to_string(player_id));
+    mysql_client.Execute("DELETE FROM dungeon_battle WHERE player_id = " + std::to_string(player_id));
+    mysql_client.Execute("DELETE FROM player_dungeon WHERE player_id = " + std::to_string(player_id) +
+                         " AND dungeon_id = " + std::to_string(dungeon_id));
+
+    std::ostringstream asset_sql;
+    asset_sql << "UPDATE player_asset SET stamina = " << game_config.GetInt("demo.stamina", 120)
+              << ", gold = " << game_config.GetInt("demo.gold", 1000)
+              << ", diamond = " << game_config.GetInt("demo.diamond", 100)
+              << " WHERE player_id = " << player_id;
+    mysql_client.Execute(asset_sql.str());
+
+    const auto active_session_key = "account:session:" + std::to_string(account_id);
+    if (const auto active_session = redis_client.Get(active_session_key); active_session.has_value()) {
+        redis_client.Del("session:" + *active_session);
+    }
+    redis_client.Del(active_session_key);
+    redis_client.Del("player:snapshot:" + std::to_string(player_id));
+    redis_client.Del("player:lock:" + std::to_string(player_id));
+
+    common::log::Logger::Instance().Log(common::log::LogLevel::kInfo, "demo state reset complete");
+}
+
+bool Require(bool condition, const std::string& message) {
+    if (condition) {
+        return true;
+    }
+
+    common::log::Logger::Instance().Log(common::log::LogLevel::kError, message);
+    return false;
+}
+
+void LogRewards(const std::vector<common::model::Reward>& rewards) {
+    std::ostringstream output;
+    output << "rewards=";
+    bool first = true;
+    for (const auto& reward : rewards) {
+        if (!first) {
+            output << ';';
+        }
+        output << reward.reward_type << ':' << reward.amount;
+        first = false;
+    }
+    common::log::Logger::Instance().Log(common::log::LogLevel::kInfo, output.str());
+}
+
 }  // namespace
 
 int main(int argc, char* argv[]) {
@@ -59,44 +137,185 @@ int main(int argc, char* argv[]) {
 
     common::config::SimpleConfig login_config;
     common::config::SimpleConfig game_config;
-    if (!LoadConfig(options.login_config, login_config) || !LoadConfig(options.game_config, game_config)) {
+    common::config::SimpleConfig dungeon_config;
+    if (!LoadConfig(options.login_config, login_config) ||
+        !LoadConfig(options.game_config, game_config) ||
+        !LoadConfig(options.dungeon_config, dungeon_config)) {
         return 1;
     }
 
-    auto account_repository = login_server::auth::InMemoryAccountRepository::FromConfig(login_config);
-    login_server::session::InMemorySessionRepository session_repository;
+    common::mysql::MySqlClient mysql_client(common::mysql::ReadConnectionOptions(game_config));
+    std::string error_message;
+    if (!mysql_client.Connect(&error_message)) {
+        common::log::Logger::Instance().Log(common::log::LogLevel::kError, "mysql connect failed: " + error_message);
+        return 1;
+    }
+
+    common::redis::RedisClient redis_client(common::redis::ReadConnectionOptions(game_config));
+    if (!redis_client.Connect(&error_message)) {
+        common::log::Logger::Instance().Log(common::log::LogLevel::kError, "redis connect failed: " + error_message);
+        return 1;
+    }
+
+    login_server::auth::MySqlAccountRepository account_repository(mysql_client);
+    const auto demo_account = account_repository.FindByName(options.account_name);
+    if (!Require(demo_account.has_value(), "demo account not found in mysql")) {
+        return 1;
+    }
+
+    if (options.reset_demo_state) {
+        ResetDemoState(
+            mysql_client, redis_client, game_config, dungeon_config, demo_account->account_id, demo_account->default_player_id);
+    }
+
+    auto session_repository = login_server::session::RedisSessionRepository::FromConfig(redis_client, login_config);
     login_server::LoginService login_service(account_repository, session_repository);
 
+    game_server::player::MySqlPlayerRepository player_repository(mysql_client);
+    auto player_cache_repository = game_server::player::RedisPlayerCacheRepository::FromConfig(redis_client, game_config);
+    game_server::player::PlayerService player_service(session_repository, player_repository, player_cache_repository);
+
+    auto dungeon_config_repository = dungeon_server::dungeon::InMemoryDungeonConfigRepository::FromConfig(dungeon_config);
+    dungeon_server::dungeon::MySqlDungeonRepository dungeon_repository(mysql_client);
+    auto battle_context_repository = dungeon_server::dungeon::RedisBattleContextRepository::FromConfig(redis_client, dungeon_config);
+    dungeon_server::dungeon::DungeonService dungeon_service(session_repository,
+                                                            redis_client,
+                                                            player_repository,
+                                                            player_cache_repository,
+                                                            dungeon_config_repository,
+                                                            dungeon_repository,
+                                                            battle_context_repository);
+
     const auto login_response = login_service.Login({options.account_name, options.password});
-    if (!login_response.success) {
-        common::log::Logger::Instance().Log(common::log::LogLevel::kError, "demo login failed: " + login_response.error_message);
+    if (!Require(login_response.success, "login failed: " + FormatError(login_response.error_code, login_response.error_message))) {
         return 1;
     }
 
     std::ostringstream login_summary;
-    login_summary << "login success, session_id=" << login_response.session.session_id
+    login_summary << "login success"
+                  << ", session_id=" << login_response.session.session_id
                   << ", account_id=" << login_response.session.account_id
-                  << ", default_player_id=" << login_response.default_player_id;
+                  << ", player_id=" << login_response.default_player_id;
     common::log::Logger::Instance().Log(common::log::LogLevel::kInfo, login_summary.str());
 
-    auto player_repository = game_server::player::InMemoryPlayerRepository::FromConfig(game_config);
-    game_server::player::PlayerService player_service(player_repository);
-
-    const auto player_id = options.player_id_override > 0 ? options.player_id_override : login_response.default_player_id;
-    const auto player_response = player_service.LoadPlayer(player_id);
-    if (!player_response.success) {
-        common::log::Logger::Instance().Log(common::log::LogLevel::kError, "demo player load failed: " + player_response.error_message);
+    auto player_response = player_service.LoadPlayer(login_response.session.session_id, login_response.default_player_id);
+    if (!Require(player_response.success,
+                 "load player failed: " + FormatError(player_response.error_code, player_response.error_message))) {
         return 1;
     }
 
     std::ostringstream player_summary;
-    player_summary << "player load success, player_id=" << player_response.player_profile.player_id
-                   << ", name=" << player_response.player_profile.player_name
-                   << ", level=" << player_response.player_profile.level
-                   << ", stamina=" << player_response.player_profile.stamina
-                   << ", gold=" << player_response.player_profile.gold
-                   << ", diamond=" << player_response.player_profile.diamond;
+    player_summary << "load player success"
+                   << ", cache=" << (player_response.loaded_from_cache ? "hit" : "miss")
+                   << ", player_id=" << player_response.player_state.profile.player_id
+                   << ", level=" << player_response.player_state.profile.level
+                   << ", stamina=" << player_response.player_state.profile.stamina
+                   << ", gold=" << player_response.player_state.profile.gold
+                   << ", diamond=" << player_response.player_state.profile.diamond;
     common::log::Logger::Instance().Log(common::log::LogLevel::kInfo, player_summary.str());
 
+    player_response = player_service.LoadPlayer(login_response.session.session_id, login_response.default_player_id);
+    if (!Require(player_response.success && player_response.loaded_from_cache,
+                 "second load should hit redis snapshot: " +
+                     FormatError(player_response.error_code, player_response.error_message))) {
+        return 1;
+    }
+
+    const auto dungeon_id = dungeon_config.GetInt("demo.dungeon_id", 1001);
+    const auto enter_response = dungeon_service.EnterDungeon(
+        {login_response.session.session_id, login_response.default_player_id, dungeon_id});
+    if (!Require(enter_response.success,
+                 "enter dungeon failed: " + FormatError(enter_response.error_code, enter_response.error_message))) {
+        return 1;
+    }
+
+    std::ostringstream enter_summary;
+    enter_summary << "enter dungeon success"
+                  << ", battle_id=" << enter_response.battle_id
+                  << ", remain_stamina=" << enter_response.remain_stamina;
+    common::log::Logger::Instance().Log(common::log::LogLevel::kInfo, enter_summary.str());
+
+    const auto settle_response =
+        dungeon_service.SettleDungeon({login_response.session.session_id,
+                                       login_response.default_player_id,
+                                       enter_response.battle_id,
+                                       dungeon_id,
+                                       3,
+                                       true});
+    if (!Require(settle_response.success,
+                 "settle dungeon failed: " + FormatError(settle_response.error_code, settle_response.error_message))) {
+        return 1;
+    }
+
+    common::log::Logger::Instance().Log(common::log::LogLevel::kInfo,
+                                        "settle dungeon success, first_clear=" +
+                                            std::string(settle_response.first_clear ? "true" : "false"));
+    LogRewards(settle_response.rewards);
+
+    const auto refreshed_player = player_service.LoadPlayer(login_response.session.session_id, login_response.default_player_id);
+    if (!Require(refreshed_player.success,
+                 "reload player after settlement failed: " +
+                     FormatError(refreshed_player.error_code, refreshed_player.error_message))) {
+        return 1;
+    }
+
+    std::ostringstream refreshed_summary;
+    refreshed_summary << "reload player success"
+                      << ", stamina=" << refreshed_player.player_state.profile.stamina
+                      << ", gold=" << refreshed_player.player_state.profile.gold
+                      << ", diamond=" << refreshed_player.player_state.profile.diamond
+                      << ", dungeon_progress_count=" << refreshed_player.player_state.dungeon_progress.size();
+    common::log::Logger::Instance().Log(common::log::LogLevel::kInfo, refreshed_summary.str());
+
+    if (options.run_negative_cases) {
+        const auto wrong_password = login_service.Login({options.account_name, "bad-password"});
+        if (!Require(!wrong_password.success && wrong_password.error_code == common::error::ErrorCode::kInvalidPassword,
+                     "invalid password case should be rejected")) {
+            return 1;
+        }
+
+        const auto invalid_session = player_service.LoadPlayer("invalid-session", login_response.default_player_id);
+        if (!Require(!invalid_session.success &&
+                         invalid_session.error_code == common::error::ErrorCode::kSessionInvalid,
+                     "invalid session case should be rejected")) {
+            return 1;
+        }
+
+        const auto duplicate_settle =
+            dungeon_service.SettleDungeon({login_response.session.session_id,
+                                           login_response.default_player_id,
+                                           enter_response.battle_id,
+                                           dungeon_id,
+                                           3,
+                                           true});
+        if (!Require(!duplicate_settle.success &&
+                         duplicate_settle.error_code == common::error::ErrorCode::kBattleAlreadySettled,
+                     "duplicate settlement should be rejected")) {
+            return 1;
+        }
+
+        const auto invalid_star_enter = dungeon_service.EnterDungeon(
+            {login_response.session.session_id, login_response.default_player_id, dungeon_id});
+        if (!Require(invalid_star_enter.success,
+                     "second enter for invalid-star case should succeed: " +
+                         FormatError(invalid_star_enter.error_code, invalid_star_enter.error_message))) {
+            return 1;
+        }
+
+        const auto invalid_star_settle =
+            dungeon_service.SettleDungeon({login_response.session.session_id,
+                                           login_response.default_player_id,
+                                           invalid_star_enter.battle_id,
+                                           dungeon_id,
+                                           99,
+                                           true});
+        if (!Require(!invalid_star_settle.success &&
+                         invalid_star_settle.error_code == common::error::ErrorCode::kInvalidStar,
+                     "invalid star should be rejected")) {
+            return 1;
+        }
+    }
+
+    common::log::Logger::Instance().Log(common::log::LogLevel::kInfo, "demo flow completed successfully");
     return 0;
 }

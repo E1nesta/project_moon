@@ -1,242 +1,189 @@
 # 代码地图
 
-这份文档的目标是帮你回答一个问题：
+这份文档回答一个问题：
 
-**这个项目每个目录、每个关键文件，分别负责什么？**
+**当前项目里，每个目录和关键文件分别负责什么？**
 
----
-
-## 1. 顶层目录
+## 顶层目录
 
 ### [CMakeLists.txt](../../CMakeLists.txt)
 
-工程构建入口。
+工程装配入口。
 
-你可以把它理解成“项目装配表”：
+现在它除了原有 `common / gateway / login_server / game_server / dungeon_server / demo_flow` 之外，还接入了：
 
-- 定义 `common` 静态库
-- 定义 `gateway` 可执行程序
-- 定义 `login_server` 可执行程序
-- 定义 `game_server` 可执行程序
-- 定义 `demo_flow` 演示程序
-
-如果你想知道“哪些 `.cpp` 最终会被编译进去”，这里是第一入口。
+- protobuf 代码生成
+- 网络层公共代码
+- `demo_client`
 
 ### [README.md](../../README.md)
 
 项目说明入口。
 
-主要告诉你：
+重点看两类运行方式：
 
-- 项目目标是什么
-- 当前做到哪个阶段
-- 怎么构建
-- 怎么跑自检
+- 离线回归：`demo_flow`
+- 真实联调：`demo_client + gateway + 三服`
 
 ### [configs/](../../configs)
 
-配置文件目录。
+配置目录。
 
-这里目前有：
+关键点：
 
-- `gateway.conf`
-- `login_server.conf`
-- `game_server.conf`
+- `gateway.conf` 现在除了监听端口，还包含上游服务地址和客户端超时配置
+- 三个业务服配置仍同时承载 MySQL / Redis 连接参数和 demo 数据参数
 
-当前的 demo 账号、角色数据也先放在配置里，后续会替换成数据库。
+### [proto/](../../proto)
 
-### [scripts/](../../scripts)
+协议定义目录。
 
-脚本目录。
+- [game_backend.proto](../../proto/game_backend.proto)
 
-目前最有用的是：
+这里定义了登录、角色加载、进入副本、结算、错误响应和心跳的 protobuf 消息。
 
-- [run_local.ps1](../../scripts/run_local.ps1)
-- [run_local.sh](../../scripts/run_local.sh)
+## 公共层：`common`
 
-它们负责：
+### 配置与日志
 
-- 配置 CMake
-- 编译工程
-- 运行服务自检
-- 运行 `demo_flow`
+- [simple_config.cpp](../../common/src/config/simple_config.cpp)
+- [logger.cpp](../../common/src/log/logger.cpp)
+- [service_app.cpp](../../common/src/bootstrap/service_app.cpp)
 
----
+这部分还是整个工程的基础设施：配置加载、日志和 `--check` 启动骨架。
 
-## 2. 公共层：`common`
+### 数据库与缓存
 
-`common` 的定位是：**所有服务都能复用的公共能力**。
+- [mysql_client.cpp](../../common/src/mysql/mysql_client.cpp)
+- [redis_client.cpp](../../common/src/redis/redis_client.cpp)
 
-### [common/src/bootstrap/service_app.cpp](../../common/src/bootstrap/service_app.cpp)
+MySQL 和 Redis 的最小封装，供所有服务复用。
 
-服务启动骨架。
+### 网络层
+
+- [message_id.h](../../common/include/common/net/message_id.h)
+- [packet.h](../../common/include/common/net/packet.h)
+- [tcp_server.cpp](../../common/src/net/tcp_server.cpp)
+- [tcp_client.cpp](../../common/src/net/tcp_client.cpp)
+- [proto_mapper.cpp](../../common/src/net/proto_mapper.cpp)
+
+这一层负责：
+
+- 自定义包头
+- epoll TCP server
+- 长连接请求-响应 client
+- protobuf 与领域对象的基础映射
+
+### 公共模型
+
+`common/include/common/model/` 下放的是业务层共享的数据结构，例如：
+
+- `Session`
+- `PlayerProfile`
+- `PlayerState`
+- `Reward`
+- `BattleContext`
+
+## Gateway
+
+### [gateway/gateway_server.cpp](../../gateway/gateway_server.cpp)
+
+当前网关的真实实现。
 
 它负责：
 
-- 读取配置文件
-- 初始化日志服务名
-- 打印关键配置摘要
-- 执行 `--check`
-- 进入心跳循环
+- 接收客户端 TCP 请求
+- 根据 `msg_id` 路由到不同业务服
+- 维护 `connection_id -> session_id -> player_id` 绑定
+- 把上游不可用、超时、非法响应映射为统一错误
 
-这不是业务代码，但它定义了“一个服务程序怎么启动”。
+### [gateway/main.cpp](../../gateway/main.cpp)
 
-### [common/src/config/simple_config.cpp](../../common/src/config/simple_config.cpp)
+网关进程入口。
 
-最基础的配置加载器。
+`--check` 仍走公共启动骨架；正常启动时会加载配置并启动真实 TCP 服务。
 
-当前支持很简单的 `key=value` 形式，足够骨架阶段使用。
+## 登录服：`login_server`
 
-### [common/src/log/logger.cpp](../../common/src/log/logger.cpp)
+### [login_service.cpp](../../login_server/login_service.cpp)
 
-最基础的日志组件。
+真正的登录业务规则。
 
-当前它做的事情也很简单：
+### [login_network_server.cpp](../../login_server/login_network_server.cpp)
 
-- 设置服务名
-- 拼时间戳
-- 输出日志级别
-- 打印到标准输出
+登录服网络包装层：
 
-### [common/include/common/model/](../../common/include/common/model)
+- 解析 protobuf 登录请求
+- 调 `LoginService`
+- 把结果转成 protobuf 响应
 
-领域数据结构定义目录。
+### 仓储
 
-当前有 3 个核心模型：
+- [mysql_account_repository.cpp](../../login_server/auth/mysql_account_repository.cpp)
+- [redis_session_repository.cpp](../../login_server/session/redis_session_repository.cpp)
 
-- [account.h](../../common/include/common/model/account.h)
-- [session.h](../../common/include/common/model/session.h)
-- [player_profile.h](../../common/include/common/model/player_profile.h)
+登录服现在默认走真实 MySQL / Redis，而不是内存仓储。
 
-你可以把这些结构体理解成“业务层之间传递的数据形状”。
+## 游戏服：`game_server`
 
----
+### [player_service.cpp](../../game_server/player/player_service.cpp)
 
-## 3. 登录服务：`login_server`
+角色加载核心逻辑：
 
-`login_server` 负责账号鉴权和会话生成。
+- 校验 session
+- 先读 Redis 快照
+- miss 再回源 MySQL
 
-### [login_server/main.cpp](../../login_server/main.cpp)
+### [game_network_server.cpp](../../game_server/game_network_server.cpp)
 
-登录服务进程入口。
+游戏服网络包装层，只负责协议映射和调用 `PlayerService`。
 
-它本身不做业务，只做参数解析，然后调用公共启动逻辑。
+### 仓储
 
-### [login_server/login_service.h](../../login_server/login_service.h)
-### [login_server/login_service.cpp](../../login_server/login_service.cpp)
+- [mysql_player_repository.cpp](../../game_server/player/mysql_player_repository.cpp)
+- [redis_player_cache_repository.cpp](../../game_server/player/redis_player_cache_repository.cpp)
 
-真正的登录业务服务。
+## 副本服：`dungeon_server`
 
-这里是当前最值得读的业务代码之一。
+### [dungeon_service.cpp](../../dungeon_server/dungeon/dungeon_service.cpp)
 
-它完成了：
+当前最核心的业务代码之一：
 
-- 根据账号名查账号
-- 检查账号是否存在
-- 检查账号是否禁用
-- 校验密码
-- 创建会话
-- 返回默认角色 ID
+- 进入副本前拿玩家锁
+- 校验等级、体力、副本配置
+- 结算前校验 `battle_id / player_id / dungeon_id`
+- 结算成功后失效玩家快照和 battle context
 
-### [login_server/auth/account_repository.h](../../login_server/auth/account_repository.h)
+### [mysql_dungeon_repository.cpp](../../dungeon_server/dungeon/mysql_dungeon_repository.cpp)
 
-账号仓储接口。
+副本进入和结算的事务落库核心：
 
-它的意义非常重要：
+- 进入时扣体力 + 写 `dungeon_battle`
+- 结算时更新 battle 状态、资源、副本进度、奖励流水
 
-- 业务层不直接依赖具体存储
-- 当前可以用内存实现
-- 未来可以换成 MySQL DAO
+### [dungeon_network_server.cpp](../../dungeon_server/dungeon_network_server.cpp)
 
-### [login_server/auth/in_memory_account_repository.cpp](../../login_server/auth/in_memory_account_repository.cpp)
+副本服网络包装层。
 
-账号仓储的内存版实现。
-
-当前只是从配置中构造一个 demo 账号对象。
-
-### [login_server/session/session_repository.h](../../login_server/session/session_repository.h)
-
-会话仓储接口。
-
-未来它很适合被 Redis 版实现替换。
-
-### [login_server/session/in_memory_session_repository.cpp](../../login_server/session/in_memory_session_repository.cpp)
-
-会话仓储的内存版实现。
-
-当前做了两件事：
-
-- 创建 `session_id`
-- 把会话对象放进内存 map
-
----
-
-## 4. 游戏服务：`game_server`
-
-`game_server` 当前负责角色加载。
-
-### [game_server/main.cpp](../../game_server/main.cpp)
-
-游戏服务进程入口。
-
-同样不直接处理业务，只负责启动。
-
-### [game_server/player/player_service.h](../../game_server/player/player_service.h)
-### [game_server/player/player_service.cpp](../../game_server/player/player_service.cpp)
-
-角色加载业务服务。
-
-它现在的逻辑很简单：
-
-- 根据 `player_id` 查角色
-- 如果没找到，返回失败
-- 如果找到，返回角色对象
-
-虽然简单，但这已经体现了业务服务和仓储的分离。
-
-### [game_server/player/player_repository.h](../../game_server/player/player_repository.h)
-
-角色仓储接口。
-
-未来最适合替换成 MySQL DAO。
-
-### [game_server/player/in_memory_player_repository.cpp](../../game_server/player/in_memory_player_repository.cpp)
-
-角色仓储的内存版实现。
-
-当前从配置中构造一个 demo 角色对象。
-
----
-
-## 5. 演示入口：`demo_flow`
+## 两个演示入口
 
 ### [tools/demo_flow/main.cpp](../../tools/demo_flow/main.cpp)
 
-这是当前最适合学习的代码入口。
+离线业务回归入口。
 
-原因是它把多个模块串起来了：
+最适合讲：
 
-- 加载配置
-- 创建账号仓储
-- 创建会话仓储
-- 创建登录服务
-- 发起登录请求
-- 创建角色仓储
-- 创建角色服务
-- 发起角色加载请求
-- 输出成功结果
+- service/repository 分层
+- 业务主链路
+- 一致性和事务
 
-换句话说，它是一个“没有网络层干扰的最小业务演示器”。
+### [tools/demo_client/main.cpp](../../tools/demo_client/main.cpp)
 
----
+真实网络联调入口。
 
-## 6. 当前代码最核心的设计点
+最适合讲：
 
-这套代码虽然还不大，但已经体现了几个很重要的工程思想：
-
-- 进程入口和业务逻辑分开
-- 业务逻辑和存储实现分开
-- 公共能力抽到 `common`
-- 用 `demo_flow` 做最小学习闭环
-
-所以你在读代码时，不要只看“逻辑多不多”，更要看“边界划得清不清楚”。
+- `gateway -> 三服` 请求链路
+- protobuf 协议
+- 会话绑定
+- 上游错误映射

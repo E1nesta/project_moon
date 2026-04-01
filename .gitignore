@@ -4,6 +4,7 @@ CMakeFiles/
 Testing/
 
 .cache/
+.codex
 .idea/
 .vscode/
 .vs/

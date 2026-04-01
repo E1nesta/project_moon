@@ -1,0 +1,128 @@
+syntax = "proto3";
+
+package game_backend.proto;
+
+message RequestContext {
+  string trace_id = 1;
+  uint64 request_id = 2;
+  string session_id = 3;
+  int64 player_id = 4;
+}
+
+message ResponseContext {
+  string trace_id = 1;
+  uint64 request_id = 2;
+  string session_id = 3;
+  int64 player_id = 4;
+}
+
+message PingRequest {
+  RequestContext context = 1;
+  string message = 2;
+}
+
+message PingResponse {
+  ResponseContext context = 1;
+  string message = 2;
+}
+
+message ErrorResponse {
+  ResponseContext context = 1;
+  int32 error_code = 2;
+  string error_name = 3;
+  string error_message = 4;
+}
+
+message PlayerDungeonProgress {
+  int32 dungeon_id = 1;
+  int32 best_star = 2;
+  bool is_first_clear = 3;
+}
+
+message PlayerProfile {
+  int64 player_id = 1;
+  int64 account_id = 2;
+  string player_name = 3;
+  int32 level = 4;
+  int32 stamina = 5;
+  int64 gold = 6;
+  int64 diamond = 7;
+}
+
+message PlayerState {
+  PlayerProfile profile = 1;
+  repeated PlayerDungeonProgress dungeon_progress = 2;
+}
+
+message Reward {
+  string reward_type = 1;
+  int64 amount = 2;
+}
+
+message LoginRequest {
+  RequestContext context = 1;
+  string account_name = 2;
+  string password = 3;
+}
+
+message LoginResponse {
+  ResponseContext context = 1;
+  bool success = 2;
+  int32 error_code = 3;
+  string error_name = 4;
+  string error_message = 5;
+  string session_id = 6;
+  int64 account_id = 7;
+  int64 player_id = 8;
+  int64 created_at_epoch_seconds = 9;
+}
+
+message LoadPlayerRequest {
+  RequestContext context = 1;
+  int64 player_id = 2;
+}
+
+message LoadPlayerResponse {
+  ResponseContext context = 1;
+  bool success = 2;
+  int32 error_code = 3;
+  string error_name = 4;
+  string error_message = 5;
+  PlayerState player_state = 6;
+  bool loaded_from_cache = 7;
+}
+
+message EnterDungeonRequest {
+  RequestContext context = 1;
+  int64 player_id = 2;
+  int32 dungeon_id = 3;
+}
+
+message EnterDungeonResponse {
+  ResponseContext context = 1;
+  bool success = 2;
+  int32 error_code = 3;
+  string error_name = 4;
+  string error_message = 5;
+  string battle_id = 6;
+  int32 remain_stamina = 7;
+}
+
+message SettleDungeonRequest {
+  RequestContext context = 1;
+  int64 player_id = 2;
+  string battle_id = 3;
+  int32 dungeon_id = 4;
+  int32 star = 5;
+  bool result = 6;
+}
+
+message SettleDungeonResponse {
+  ResponseContext context = 1;
+  bool success = 2;
+  int32 error_code = 3;
+  string error_name = 4;
+  string error_message = 5;
+  bool first_clear = 6;
+  repeated Reward rewards = 7;
+}

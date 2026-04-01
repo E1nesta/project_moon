@@ -19,7 +19,12 @@ common::model::Session InMemorySessionRepository::Create(std::int64_t account_id
     session.session_id = stream.str();
 
     std::lock_guard<std::mutex> lock(mutex_);
+    const auto active_iter = account_sessions_.find(account_id);
+    if (active_iter != account_sessions_.end()) {
+        sessions_.erase(active_iter->second);
+    }
     sessions_[session.session_id] = session;
+    account_sessions_[account_id] = session.session_id;
     return session;
 }
 
@@ -33,4 +38,3 @@ std::optional<common::model::Session> InMemorySessionRepository::FindById(const 
 }
 
 }  // namespace login_server::session
-

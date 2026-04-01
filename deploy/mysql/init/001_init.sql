@@ -68,23 +68,22 @@ CREATE TABLE IF NOT EXISTS reward_log (
     UNIQUE KEY uk_reward (player_id, battle_id, reward_type)
 );
 
-INSERT INTO account (account_name, password_hash)
-VALUES ('demo', 'demo123')
+INSERT INTO account (account_id, account_name, password_hash)
+VALUES (10001, 'demo', 'demo123')
 ON DUPLICATE KEY UPDATE password_hash = VALUES(password_hash);
 
-INSERT INTO player (account_id, name, level, exp, last_login_at)
-SELECT account_id, 'hero_demo', 10, 0, NOW()
-FROM account
-WHERE account_name = 'demo'
-  AND NOT EXISTS (
-      SELECT 1 FROM player WHERE player.account_id = account.account_id
-  );
+INSERT INTO player (player_id, account_id, name, level, exp, last_login_at)
+VALUES (20001, 10001, 'hero_demo', 10, 0, NOW())
+ON DUPLICATE KEY UPDATE
+    account_id = VALUES(account_id),
+    name = VALUES(name),
+    level = VALUES(level),
+    exp = VALUES(exp),
+    last_login_at = VALUES(last_login_at);
 
 INSERT INTO player_asset (player_id, stamina, gold, diamond)
-SELECT player_id, 120, 1000, 100
-FROM player
-WHERE name = 'hero_demo'
-  AND NOT EXISTS (
-      SELECT 1 FROM player_asset WHERE player_asset.player_id = player.player_id
-  );
-
+VALUES (20001, 120, 1000, 100)
+ON DUPLICATE KEY UPDATE
+    stamina = VALUES(stamina),
+    gold = VALUES(gold),
+    diamond = VALUES(diamond);

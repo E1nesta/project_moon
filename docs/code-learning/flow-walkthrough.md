@@ -1,192 +1,141 @@
-# 流程走读：从 `demo_flow` 理解当前代码
+# 流程走读：从双入口理解当前代码
 
-这份文档用一条最短路径带你理解当前项目：
+这套项目现在有两条理解路径：
 
-**账号登录 -> 创建会话 -> 加载角色**
+- `demo_flow`：最短业务路径
+- `demo_client -> gateway -> login/game/dungeon`：真实系统路径
 
-当前最推荐的阅读入口是：
+建议先读第一条，再读第二条。
 
-- [tools/demo_flow/main.cpp](../../tools/demo_flow/main.cpp)
+## 1. 先看 `demo_flow`
 
-因为它直接把整个链路串起来了。
-
----
-
-## 1. 程序从哪里开始
-
-程序入口在：
+入口：
 
 - [tools/demo_flow/main.cpp](../../tools/demo_flow/main.cpp)
 
-先看 `main()` 做了什么。
+它把整个业务闭环直接串起来：
 
-它的工作顺序大致是：
+1. 读配置
+2. 初始化 MySQL / Redis
+3. 创建登录服务依赖
+4. 创建角色服务依赖
+5. 创建副本服务依赖
+6. 执行登录
+7. 执行角色加载
+8. 执行进入副本
+9. 执行结算
+10. 执行异常用例
 
-1. 设置日志服务名
-2. 解析命令行参数
-3. 读取登录服配置
-4. 读取游戏服配置
-5. 创建账号仓储和会话仓储
-6. 创建登录服务
-7. 执行登录
-8. 创建角色仓储
-9. 创建角色服务
-10. 执行角色加载
-11. 打印结果
+这条路径最适合回答：
 
-这就是整个学习主线。
+- 业务规则到底是什么
+- Redis 和 MySQL 在哪里参与
+- 哪些地方做了幂等和一致性保护
 
----
+## 2. 登录流程怎么走
 
-## 2. 登录阶段是怎么走的
-
-### 第一步：创建仓储
-
-在 `demo_flow` 里，登录相关先创建了两个对象：
-
-- `InMemoryAccountRepository`
-- `InMemorySessionRepository`
-
-它们分别代表：
-
-- 账号数据从哪里来
-- 会话数据存到哪里去
-
-当前它们都只是内存版实现，但接口设计已经是“可替换”的。
-
-### 第二步：创建业务服务
-
-接着创建：
+登录业务核心在：
 
 - [login_server/login_service.cpp](../../login_server/login_service.cpp)
 
-`LoginService` 不关心账号到底存在哪里，也不关心会话到底存在哪里。
+逻辑很短，但边界很清楚：
 
-它只关心业务规则：
+- 按账号名查账号
+- 校验账号状态和密码
+- 创建 Redis session
+- 返回默认角色 ID
 
-- 有没有这个账号
-- 账号是否启用
-- 密码对不对
-- 登录成功后要不要创建会话
+网络版登录是在：
 
-### 第三步：执行登录
+- [login_server/login_network_server.cpp](../../login_server/login_network_server.cpp)
 
-`LoginService::Login()` 当前逻辑很短，但非常值得反复看。
+它不重新实现业务规则，只做三件事：
 
-它体现了最重要的服务层职责：
+- 解析 protobuf
+- 调 `LoginService`
+- 把结果转成 protobuf 响应
 
-- 调仓储拿数据
-- 做业务判断
-- 组织返回结果
+## 3. 角色加载怎么走
 
-这正是以后接 MySQL / Redis 后仍然不会变的部分。
-
----
-
-## 3. 角色加载阶段是怎么走的
-
-### 第一步：创建角色仓储
-
-登录成功后，`demo_flow` 会创建：
-
-- `InMemoryPlayerRepository`
-
-它负责根据 `player_id` 提供角色数据。
-
-### 第二步：创建角色服务
-
-接着创建：
+角色加载业务核心在：
 
 - [game_server/player/player_service.cpp](../../game_server/player/player_service.cpp)
 
-`PlayerService` 的职责和 `LoginService` 很像：
+它先校验 session，再决定：
 
-- 调仓储
-- 判断是否查到玩家
-- 返回统一结构
+- 命中 Redis 快照直接返回
+- 未命中时从 MySQL 读取，再回填 Redis
 
-### 第三步：执行角色加载
+网络版入口在：
 
-`PlayerService::LoadPlayer()` 根据 `player_id` 取角色对象。
+- [game_server/game_network_server.cpp](../../game_server/game_network_server.cpp)
 
-如果没找到：
+它负责把 `LoadPlayerRequest` 映射成现有 service 调用。
 
-- 返回失败
+## 4. 进入副本和结算怎么走
 
-如果找到了：
+核心业务在：
 
-- 返回 `PlayerProfile`
+- [dungeon_server/dungeon/dungeon_service.cpp](../../dungeon_server/dungeon/dungeon_service.cpp)
 
-这就是当前“角色加载”主逻辑。
+进入副本阶段：
 
----
+1. 校验 session
+2. 校验副本配置
+3. 获取 `player:lock:{player_id}`
+4. 从 MySQL 读取角色状态
+5. 校验等级和体力
+6. 调仓储事务扣体力并写 `dungeon_battle`
+7. 写 Redis `battle:ctx:{battle_id}`
+8. 失效角色快照
 
-## 4. 为什么现在先用内存仓储
+结算阶段：
 
-这是当前代码最容易误解的地方。
+1. 校验 session
+2. 校验副本配置和星级
+3. 获取玩家锁
+4. 优先从 Redis 读 `battle:ctx`
+5. Redis miss 时回源 MySQL
+6. 校验 `battle_id / player_id / dungeon_id`
+7. 调仓储事务更新 battle 状态、资源、副本进度、奖励流水
+8. 删除 `battle:ctx`
+9. 失效角色快照
 
-现在不用真实 MySQL / Redis，不是因为不重要，而是因为当前阶段有一个更优先的目标：
+## 5. 再看真实网络链路
 
-**先把调用关系、分层方式、业务骨架讲清楚。**
+真实入口在：
 
-内存仓储的价值在于：
+- [tools/demo_client/main.cpp](../../tools/demo_client/main.cpp)
 
-- 不需要先处理第三方库接入
-- 不需要先处理数据库环境问题
-- 可以把注意力放在业务组织方式上
-- 后续替换真实 DAO 时，服务层基本不用重写
+客户端先连：
 
-所以你读这部分代码时，应该重点看：
+- [gateway/gateway_server.cpp](../../gateway/gateway_server.cpp)
 
-- 为什么有 `Repository` 接口
-- 为什么 `Service` 依赖接口而不是依赖具体实现
+网关负责：
 
----
+- 收包
+- 解析 `msg_id`
+- 校验连接上的 `session_id / player_id` 绑定
+- 转发到对应业务服
 
-## 5. 服务进程是怎么启动的
+然后分别由：
 
-除了业务链路本身，你还应该顺手看：
+- [login_server/login_network_server.cpp](../../login_server/login_network_server.cpp)
+- [game_server/game_network_server.cpp](../../game_server/game_network_server.cpp)
+- [dungeon_server/dungeon_network_server.cpp](../../dungeon_server/dungeon_network_server.cpp)
 
-- [common/src/bootstrap/service_app.cpp](../../common/src/bootstrap/service_app.cpp)
+把 protobuf 请求映射到原有 service 层。
 
-这个文件告诉你：
+## 6. 为什么还保留 `demo_flow`
 
-- 服务程序怎么读配置
-- `--check` 是怎么工作的
-- 服务为什么会进入心跳循环
+这是现在最值得理解的一点。
 
-它属于“进程启动逻辑”，不是业务逻辑。
+项目补了真实 `gateway` 和四进程闭环后，没有删除 `demo_flow`，因为它仍然有两个价值：
 
-这个区别非常重要：
+- 做无网络干扰的业务回归
+- 面试时先讲业务，再讲系统演进
 
-- `service_app.cpp` 决定“程序怎么跑起来”
-- `login_service.cpp` / `player_service.cpp` 决定“业务怎么处理”
+所以现在你可以把这套代码理解成：
 
----
-
-## 6. 现在读代码时最好的提问方式
-
-建议你边读边问自己这几个问题：
-
-1. 这个文件是入口、服务、仓储，还是模型？
-2. 这个类是在表达业务规则，还是只是在存取数据？
-3. 如果以后换成 MySQL / Redis，实现会改在哪里？业务会不会跟着变？
-
-如果你一直带着这三个问题，当前项目会非常好懂。
-
----
-
-## 7. 建议你接下来怎么读
-
-如果你准备真正开始啃代码，我建议按这个顺序：
-
-1. [tools/demo_flow/main.cpp](../../tools/demo_flow/main.cpp)
-2. [login_server/login_service.cpp](../../login_server/login_service.cpp)
-3. [login_server/auth/in_memory_account_repository.cpp](../../login_server/auth/in_memory_account_repository.cpp)
-4. [login_server/session/in_memory_session_repository.cpp](../../login_server/session/in_memory_session_repository.cpp)
-5. [game_server/player/player_service.cpp](../../game_server/player/player_service.cpp)
-6. [game_server/player/in_memory_player_repository.cpp](../../game_server/player/in_memory_player_repository.cpp)
-7. [common/src/bootstrap/service_app.cpp](../../common/src/bootstrap/service_app.cpp)
-8. [CMakeLists.txt](../../CMakeLists.txt)
-
-按这个顺序读，理解成本最低，也最容易建立“整体 -> 细节”的感觉。
+- `demo_flow` 负责证明“业务做对了”
+- `demo_client + gateway + 三服` 负责证明“系统也搭起来了”

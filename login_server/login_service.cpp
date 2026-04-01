@@ -8,23 +8,23 @@ LoginService::LoginService(auth::AccountRepository& account_repository, session:
 LoginResponse LoginService::Login(const LoginRequest& request) {
     const auto account = account_repository_.FindByName(request.account_name);
     if (!account.has_value()) {
-        return LoginResponse{false, "account not found", {}, 0};
+        return LoginResponse{false, common::error::ErrorCode::kAccountNotFound, "account not found", {}, 0};
     }
 
     if (!account->enabled) {
-        return LoginResponse{false, "account disabled", {}, 0};
+        return LoginResponse{false, common::error::ErrorCode::kAccountDisabled, "account disabled", {}, 0};
     }
 
     if (account->password != request.password) {
-        return LoginResponse{false, "invalid password", {}, 0};
+        return LoginResponse{false, common::error::ErrorCode::kInvalidPassword, "invalid password", {}, 0};
     }
 
     auto response = LoginResponse{};
     response.success = true;
+    response.error_code = common::error::ErrorCode::kOk;
     response.default_player_id = account->default_player_id;
     response.session = session_repository_.Create(account->account_id, account->default_player_id);
     return response;
 }
 
 }  // namespace login_server
-

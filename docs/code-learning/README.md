@@ -1,88 +1,58 @@
 # 项目代码学习导读
 
-这组文档不是架构设计文档，而是给“第一次读这套代码的人”准备的学习入口。
+这组文档面向“第一次读这套代码的人”，重点不是列完所有文件，而是帮你建立两条阅读主线：
 
-如果你的目标是理解当前项目代码，建议按下面顺序阅读：
+1. `demo_flow`：理解业务规则、仓储分层和数据一致性
+2. `demo_client -> gateway -> login/game/dungeon`：理解真实网络链路和进程协作
 
-1. 先看 [项目总 README](../../README.md)，了解项目目标、可执行目标和当前阶段。
-2. 再看 [代码地图](./code-map.md)，先建立目录和模块的整体感。
-3. 然后看 [流程走读](./flow-walkthrough.md)，顺着 `demo_flow` 把登录和角色加载代码串起来。
-4. 最后再回到具体 `.cpp/.h` 文件逐个细读。
+推荐阅读顺序：
+
+1. [项目总 README](../../README.md)
+2. [代码地图](./code-map.md)
+3. [流程走读](./flow-walkthrough.md)
+4. 再回到具体 `.cpp/.h` 文件精读
 
 ## 当前项目处于什么阶段
 
-目前这套代码还是“学习型骨架”阶段，特点是：
+现在这套代码已经不是“只有学习骨架”的阶段，而是“双入口作品阶段”：
 
-- 已经有清晰的目录和模块边界。
-- 已经有登录、会话、角色加载的业务骨架。
-- 目前仓储层仍然是内存版实现，目的是先把业务流程讲清楚。
-- 真正的 MySQL / Redis DAO 还没有接入。
+- 业务层已经接入真实 MySQL / Redis
+- `gateway`、`login_server`、`game_server`、`dungeon_server` 都是可独立启动的 TCP 服务
+- `demo_flow` 仍保留，用来做无网络干扰的业务回归
+- `demo_client` 用来跑真实联调链路
 
-所以你在阅读时要带着一个认知：
+## 最适合的阅读方式
 
-**现在的重点是理解代码组织方式和调用链，而不是研究复杂底层实现。**
+### 路线 1：先读业务
 
-## 先从哪里看最容易懂
-
-如果你只想最快进入状态，建议先读这 5 个文件：
+先看：
 
 1. [tools/demo_flow/main.cpp](../../tools/demo_flow/main.cpp)
 2. [login_server/login_service.cpp](../../login_server/login_service.cpp)
 3. [game_server/player/player_service.cpp](../../game_server/player/player_service.cpp)
-4. [common/src/bootstrap/service_app.cpp](../../common/src/bootstrap/service_app.cpp)
-5. [CMakeLists.txt](../../CMakeLists.txt)
+4. [dungeon_server/dungeon/dungeon_service.cpp](../../dungeon_server/dungeon/dungeon_service.cpp)
 
-原因很简单：
+这条路线最适合理解：
 
-- `demo_flow` 是整条学习链路的“入口”
-- `login_service` 是第一个真正有业务判断的地方
-- `player_service` 是第二个真正有业务判断的地方
-- `service_app` 体现了服务进程如何启动
-- `CMakeLists.txt` 告诉你工程是怎么被拼装起来的
+- 登录鉴权
+- 角色加载缓存策略
+- 进入副本扣体力
+- 结算事务与重复领奖拦截
 
-## 推荐阅读方法
+### 路线 2：再读系统
 
-### 方法 1：按“执行路径”读
+再看：
 
-最适合新手。
+1. [gateway/gateway_server.cpp](../../gateway/gateway_server.cpp)
+2. [login_server/login_network_server.cpp](../../login_server/login_network_server.cpp)
+3. [game_server/game_network_server.cpp](../../game_server/game_network_server.cpp)
+4. [dungeon_server/dungeon_network_server.cpp](../../dungeon_server/dungeon_network_server.cpp)
+5. [common/include/common/net/message_id.h](../../common/include/common/net/message_id.h)
+6. [proto/game_backend.proto](../../proto/game_backend.proto)
 
-从 `demo_flow/main.cpp` 开始，看程序如何：
+这条路线最适合理解：
 
-- 读取配置
-- 创建仓储对象
-- 创建业务服务对象
-- 发起登录
-- 发起角色加载
-- 输出结果
-
-### 方法 2：按“分层”读
-
-更适合你已经看过一遍后做第二轮理解。
-
-可以按下面顺序读：
-
-- 公共基础层：`common`
-- 业务层：`login_server`、`game_server`
-- 演示入口：`tools/demo_flow`
-- 构建与运行：`CMakeLists.txt`、`scripts/`
-
-## 阅读时要特别留意的 3 个问题
-
-1. 这个文件是在“定义数据”，还是“处理业务”，还是“启动程序”？
-2. 这个类是“抽象接口”，还是“临时内存实现”，还是“真正业务服务”？
-3. 当前代码里哪些地方以后会被真实 MySQL / Redis 替换？
-
-如果你能在阅读过程中一直回答这 3 个问题，理解速度会快很多。
-
-## 学完这套代码后，你应该能讲清楚什么
-
-读完当前项目，你至少应该能自己讲清楚下面这些点：
-
-- 这个项目的目录是怎么分的
-- `common`、`login_server`、`game_server`、`demo_flow` 各自负责什么
-- 登录流程当前是如何被组织起来的
-- 角色加载流程当前是如何被组织起来的
-- 为什么现在先用内存仓储
-- 为什么后面再替换成 MySQL / Redis DAO
-
-如果你能把这些讲顺，说明你已经不是“看过代码”，而是“理解了这套代码”。
+- TCP/protobuf 包是怎么组织的
+- `gateway` 怎么做路由和连接绑定
+- 三个业务服怎么把 protobuf 请求映射到现有 service 层
+- 为什么网络层和业务层仍然保持分离

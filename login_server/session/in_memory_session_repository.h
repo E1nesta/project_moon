@@ -18,8 +18,8 @@ public:
 private:
     mutable std::mutex mutex_;
     std::unordered_map<std::string, common::model::Session> sessions_;
+    std::unordered_map<std::int64_t, std::string> account_sessions_;
     std::atomic<std::uint64_t> sequence_{1};
 };
 
 }  // namespace login_server::session
-
