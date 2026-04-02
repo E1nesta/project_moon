@@ -11,18 +11,21 @@
 #include "game_server/player/player_repository.h"
 #include "login_server/session/session_repository.h"
 
+#include <atomic>
 #include <cstdint>
 #include <string>
 #include <vector>
 
 namespace dungeon_server::dungeon {
 
+// Application model for the enter dungeon use case.
 struct EnterDungeonRequest {
     std::string session_id;
     std::int64_t player_id = 0;
     int dungeon_id = 0;
 };
 
+// Application result for the enter dungeon use case.
 struct EnterDungeonResponse {
     bool success = false;
     common::error::ErrorCode error_code = common::error::ErrorCode::kOk;
@@ -31,6 +34,7 @@ struct EnterDungeonResponse {
     int remain_stamina = 0;
 };
 
+// Application model for the settle dungeon use case.
 struct SettleDungeonRequest {
     std::string session_id;
     std::int64_t player_id = 0;
@@ -40,6 +44,7 @@ struct SettleDungeonRequest {
     bool result = true;
 };
 
+// Application result for the settle dungeon use case.
 struct SettleDungeonResponse {
     bool success = false;
     common::error::ErrorCode error_code = common::error::ErrorCode::kOk;
@@ -48,6 +53,7 @@ struct SettleDungeonResponse {
     std::vector<common::model::Reward> rewards;
 };
 
+// Application service that coordinates dungeon rules, locking and persistence boundaries.
 class DungeonService {
 public:
     DungeonService(login_server::session::SessionRepository& session_repository,
@@ -62,6 +68,21 @@ public:
     [[nodiscard]] SettleDungeonResponse SettleDungeon(const SettleDungeonRequest& request);
 
 private:
+    [[nodiscard]] bool HasValidSession(const std::string& session_id, std::int64_t player_id) const;
+    [[nodiscard]] std::optional<DungeonConfig> LoadDungeonConfig(int dungeon_id) const;
+    [[nodiscard]] std::optional<common::model::PlayerState> LoadPlayerState(std::int64_t player_id) const;
+    [[nodiscard]] std::optional<common::model::BattleContext> LoadBattleContext(const std::string& battle_id) const;
+    [[nodiscard]] std::optional<EnterDungeonResponse> ValidateEnterRequirements(
+        const common::model::PlayerState& player_state,
+        const DungeonConfig& dungeon_config) const;
+    [[nodiscard]] std::optional<SettleDungeonResponse> ValidateSettleInput(
+        const SettleDungeonRequest& request,
+        const DungeonConfig& dungeon_config) const;
+    [[nodiscard]] std::optional<SettleDungeonResponse> ValidateBattleContext(
+        const SettleDungeonRequest& request,
+        const common::model::BattleContext& battle_context) const;
+    [[nodiscard]] common::error::ErrorCode MapEnterStorageError(const std::string& error_message) const;
+    [[nodiscard]] common::error::ErrorCode MapSettleStorageError(const std::string& error_message) const;
     [[nodiscard]] std::string GenerateBattleId(std::int64_t player_id, int dungeon_id);
     [[nodiscard]] bool AcquirePlayerLock(std::int64_t player_id);
     void ReleasePlayerLock(std::int64_t player_id);
@@ -73,7 +94,7 @@ private:
     DungeonConfigRepository& dungeon_config_repository_;
     MySqlDungeonRepository& dungeon_repository_;
     BattleContextRepository& battle_context_repository_;
-    std::uint64_t sequence_ = 1;
+    std::atomic<std::uint64_t> sequence_{1};
 };
 
 }  // namespace dungeon_server::dungeon

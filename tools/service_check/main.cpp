@@ -1,7 +1,9 @@
 #include "common/build/build_info.h"
 #include "common/config/simple_config.h"
 #include "common/mysql/mysql_client.h"
+#include "common/mysql/mysql_client_pool.h"
 #include "common/redis/redis_client.h"
+#include "common/redis/redis_client_pool.h"
 
 #include <arpa/inet.h>
 #include <netdb.h>
@@ -86,6 +88,47 @@ bool CheckOptionalTcpDependency(const common::config::SimpleConfig& config,
     return CheckTcpDependency(config.GetString(host_key), config.GetInt(port_key), timeout_ms, error_message);
 }
 
+bool CheckExecutionConfig(const common::config::SimpleConfig& config, std::string* error_message) {
+    const auto worker_threads = config.GetInt("execution.worker_threads", config.GetInt("transport.io_threads", 1));
+    const auto shard_count = config.GetInt("execution.shard_count", worker_threads);
+    if (worker_threads <= 0) {
+        if (error_message != nullptr) {
+            *error_message = "execution.worker_threads must be > 0";
+        }
+        return false;
+    }
+
+    if (shard_count != worker_threads) {
+        if (error_message != nullptr) {
+            *error_message = "execution.shard_count must equal execution.worker_threads";
+        }
+        return false;
+    }
+
+    if (config.GetInt("execution.queue_limit", 1024) <= 0) {
+        if (error_message != nullptr) {
+            *error_message = "execution.queue_limit must be > 0";
+        }
+        return false;
+    }
+
+    if (config.Contains("gateway.forward_workers") && config.GetInt("gateway.forward_workers", 0) <= 0) {
+        if (error_message != nullptr) {
+            *error_message = "gateway.forward_workers must be > 0";
+        }
+        return false;
+    }
+
+    if (config.Contains("gateway.forward_queue_limit") && config.GetInt("gateway.forward_queue_limit", 0) <= 0) {
+        if (error_message != nullptr) {
+            *error_message = "gateway.forward_queue_limit must be > 0";
+        }
+        return false;
+    }
+
+    return true;
+}
+
 }  // namespace
 
 int main(int argc, char* argv[]) {
@@ -111,32 +154,41 @@ int main(int argc, char* argv[]) {
     }
 
     std::string error_message;
-    if (config.Contains("mysql.host")) {
-        common::mysql::MySqlClient mysql_client(common::mysql::ReadConnectionOptions(config));
-        if (!mysql_client.Ping(&error_message)) {
+    if (config.Contains("storage.mysql.host")) {
+        common::mysql::MySqlClientPool mysql_pool(
+            common::mysql::ReadConnectionOptions(config),
+            static_cast<std::size_t>(config.GetInt("storage.mysql.pool_size", 1)));
+        if (!mysql_pool.Initialize(&error_message)) {
             std::cerr << "mysql not ready: " << error_message << '\n';
             return 1;
         }
     }
 
-    if (config.Contains("redis.host")) {
-        common::redis::RedisClient redis_client(common::redis::ReadConnectionOptions(config));
-        if (!redis_client.Ping(&error_message)) {
+    if (config.Contains("storage.redis.host")) {
+        common::redis::RedisClientPool redis_pool(
+            common::redis::ReadConnectionOptions(config),
+            static_cast<std::size_t>(config.GetInt("storage.redis.pool_size", 1)));
+        if (!redis_pool.Initialize(&error_message)) {
             std::cerr << "redis not ready: " << error_message << '\n';
             return 1;
         }
     }
 
+    if (!CheckExecutionConfig(config, &error_message)) {
+        std::cerr << "execution config invalid: " << error_message << '\n';
+        return 1;
+    }
+
     const auto timeout_ms = config.GetInt("upstream.timeout_ms", config.GetInt("client.timeout_ms", 2000));
-    if (!CheckOptionalTcpDependency(config, "login.upstream.host", "login.upstream.port", timeout_ms, &error_message)) {
+    if (!CheckOptionalTcpDependency(config, "upstream.login.host", "upstream.login.port", timeout_ms, &error_message)) {
         std::cerr << "login upstream not ready: " << error_message << '\n';
         return 1;
     }
-    if (!CheckOptionalTcpDependency(config, "game.upstream.host", "game.upstream.port", timeout_ms, &error_message)) {
-        std::cerr << "game upstream not ready: " << error_message << '\n';
+    if (!CheckOptionalTcpDependency(config, "upstream.player.host", "upstream.player.port", timeout_ms, &error_message)) {
+        std::cerr << "player upstream not ready: " << error_message << '\n';
         return 1;
     }
-    if (!CheckOptionalTcpDependency(config, "dungeon.upstream.host", "dungeon.upstream.port", timeout_ms, &error_message)) {
+    if (!CheckOptionalTcpDependency(config, "upstream.dungeon.host", "upstream.dungeon.port", timeout_ms, &error_message)) {
         std::cerr << "dungeon upstream not ready: " << error_message << '\n';
         return 1;
     }

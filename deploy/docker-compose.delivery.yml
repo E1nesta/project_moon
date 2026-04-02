@@ -5,14 +5,14 @@ x-backend-service: &backend-service
   image: mobile_game_backend:local
   restart: unless-stopped
   env_file:
-    - ./.env.delivery
+    - ${DELIVERY_ENV_FILE:-./.env.delivery.example}
 
 services:
   mysql:
     image: mysql:8.0
     restart: unless-stopped
     env_file:
-      - ./.env.delivery
+      - ${DELIVERY_ENV_FILE:-./.env.delivery.example}
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
       MYSQL_DATABASE: ${MYSQL_DATABASE}
@@ -34,7 +34,7 @@ services:
     image: redis:7.2
     restart: unless-stopped
     env_file:
-      - ./.env.delivery
+      - ${DELIVERY_ENV_FILE:-./.env.delivery.example}
     command: ["redis-server", "--appendonly", "yes"]
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
@@ -56,16 +56,16 @@ services:
       timeout: 3s
       retries: 20
 
-  game_server:
+  player_server:
     <<: *backend-service
-    command: ["./game_server", "--config", "configs/delivery/game_server.conf"]
+    command: ["./player_server", "--config", "configs/delivery/player_server.conf"]
     depends_on:
       mysql:
         condition: service_healthy
       redis:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "./service_check", "--config", "configs/delivery/game_server.conf", "--mode", "ready"]
+      test: ["CMD", "./service_check", "--config", "configs/delivery/player_server.conf", "--mode", "ready"]
       interval: 5s
       timeout: 3s
       retries: 20
@@ -86,36 +86,36 @@ services:
 
   gateway_1:
     <<: *backend-service
-    command: ["./gateway", "--config", "configs/delivery/gateway_1.conf"]
+    command: ["./gateway_server", "--config", "configs/delivery/gateway_server_1.conf"]
     depends_on:
       redis:
         condition: service_healthy
       login_server:
         condition: service_healthy
-      game_server:
+      player_server:
         condition: service_healthy
       dungeon_server:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "./service_check", "--config", "configs/delivery/gateway_1.conf", "--mode", "ready"]
+      test: ["CMD", "./service_check", "--config", "configs/delivery/gateway_server_1.conf", "--mode", "ready"]
       interval: 5s
       timeout: 3s
       retries: 20
 
   gateway_2:
     <<: *backend-service
-    command: ["./gateway", "--config", "configs/delivery/gateway_2.conf"]
+    command: ["./gateway_server", "--config", "configs/delivery/gateway_server_2.conf"]
     depends_on:
       redis:
         condition: service_healthy
       login_server:
         condition: service_healthy
-      game_server:
+      player_server:
         condition: service_healthy
       dungeon_server:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "./service_check", "--config", "configs/delivery/gateway_2.conf", "--mode", "ready"]
+      test: ["CMD", "./service_check", "--config", "configs/delivery/gateway_server_2.conf", "--mode", "ready"]
       interval: 5s
       timeout: 3s
       retries: 20

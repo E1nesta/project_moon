@@ -5,9 +5,10 @@
 
 namespace game_server::player {
 
-MySqlPlayerRepository::MySqlPlayerRepository(common::mysql::MySqlClient& mysql_client) : mysql_client_(mysql_client) {}
+MySqlPlayerRepository::MySqlPlayerRepository(common::mysql::MySqlClientPool& mysql_pool) : mysql_pool_(mysql_pool) {}
 
 std::optional<common::model::PlayerState> MySqlPlayerRepository::LoadPlayerState(std::int64_t player_id) const {
+    auto mysql = mysql_pool_.Acquire();
     std::ostringstream profile_sql;
     profile_sql << "SELECT p.player_id, p.account_id, p.name, p.level, "
                    "COALESCE(a.stamina, 0) AS stamina, COALESCE(a.gold, 0) AS gold, COALESCE(a.diamond, 0) AS diamond "
@@ -16,7 +17,7 @@ std::optional<common::model::PlayerState> MySqlPlayerRepository::LoadPlayerState
                    "WHERE p.player_id = "
                 << player_id << " LIMIT 1";
 
-    const auto row = mysql_client_.QueryOne(profile_sql.str());
+    const auto row = mysql->QueryOne(profile_sql.str());
     if (!row.has_value()) {
         return std::nullopt;
     }
@@ -32,7 +33,7 @@ std::optional<common::model::PlayerState> MySqlPlayerRepository::LoadPlayerState
 
     std::ostringstream progress_sql;
     progress_sql << "SELECT dungeon_id, best_star, is_first_clear FROM player_dungeon WHERE player_id = " << player_id;
-    const auto progress_rows = mysql_client_.Query(progress_sql.str());
+    const auto progress_rows = mysql->Query(progress_sql.str());
     for (const auto& progress_row : progress_rows) {
         common::model::PlayerDungeonProgress progress;
         progress.dungeon_id = std::stoi(progress_row.at("dungeon_id"));

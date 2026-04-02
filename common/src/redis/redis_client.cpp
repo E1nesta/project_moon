@@ -8,11 +8,11 @@ namespace common::redis {
 
 ConnectionOptions ReadConnectionOptions(const config::SimpleConfig& config) {
     ConnectionOptions options;
-    options.host = config.GetString("redis.host", options.host);
-    options.port = config.GetInt("redis.port", options.port);
-    options.password = config.GetString("redis.password", options.password);
-    options.database = config.GetInt("redis.database", options.database);
-    options.timeout_ms = config.GetInt("redis.timeout_ms", options.timeout_ms);
+    options.host = config.GetString("storage.redis.host", options.host);
+    options.port = config.GetInt("storage.redis.port", options.port);
+    options.password = config.GetString("storage.redis.password", options.password);
+    options.database = config.GetInt("storage.redis.database", options.database);
+    options.timeout_ms = config.GetInt("storage.redis.timeout_ms", options.timeout_ms);
     return options;
 }
 

@@ -8,7 +8,7 @@ cmake --build build -j
 
 ./build/demo_flow \
   --login-config configs/login_server.conf \
-  --game-config configs/game_server.conf \
+  --player-config configs/player_server.conf \
   --dungeon-config configs/dungeon_server.conf
 
 SKIP_BUILD=1 ./scripts/run_network_demo.sh

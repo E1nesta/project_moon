@@ -3,7 +3,7 @@
 #include "common/model/battle_context.h"
 #include "common/model/player_state.h"
 #include "common/model/reward.h"
-#include "common/mysql/mysql_client.h"
+#include "common/mysql/mysql_client_pool.h"
 #include "dungeon_server/dungeon/dungeon_config.h"
 
 #include <optional>
@@ -28,6 +28,7 @@ struct SettleDungeonResult {
 
 class MySqlDungeonRepository {
 public:
+    explicit MySqlDungeonRepository(common::mysql::MySqlClientPool& mysql_pool);
     explicit MySqlDungeonRepository(common::mysql::MySqlClient& mysql_client);
     virtual ~MySqlDungeonRepository() = default;
 
@@ -40,7 +41,8 @@ public:
                                                             int star);
 
 private:
-    common::mysql::MySqlClient& mysql_client_;
+    common::mysql::MySqlClientPool* mysql_pool_ = nullptr;
+    common::mysql::MySqlClient* mysql_client_ = nullptr;
 };
 
 }  // namespace dungeon_server::dungeon

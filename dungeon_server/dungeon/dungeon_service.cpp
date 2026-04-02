@@ -1,8 +1,40 @@
 #include "dungeon_server/dungeon/dungeon_service.h"
 
+#include <functional>
 #include <sstream>
 
 namespace dungeon_server::dungeon {
+
+namespace {
+
+EnterDungeonResponse BuildEnterError(common::error::ErrorCode error_code, std::string error_message) {
+    return {false, error_code, std::move(error_message), "", 0};
+}
+
+EnterDungeonResponse BuildEnterSuccess(std::string battle_id, int remain_stamina) {
+    return {true, common::error::ErrorCode::kOk, "", std::move(battle_id), remain_stamina};
+}
+
+SettleDungeonResponse BuildSettleError(common::error::ErrorCode error_code, std::string error_message) {
+    return {false, error_code, std::move(error_message), false, {}};
+}
+
+SettleDungeonResponse BuildSettleSuccess(bool first_clear, std::vector<common::model::Reward> rewards) {
+    return {true, common::error::ErrorCode::kOk, "", first_clear, std::move(rewards)};
+}
+
+struct ScopedPlayerLock {
+    std::function<void()> release;
+    bool acquired = false;
+
+    ~ScopedPlayerLock() {
+        if (acquired && release) {
+            release();
+        }
+    }
+};
+
+}  // namespace
 
 DungeonService::DungeonService(login_server::session::SessionRepository& session_repository,
                                PlayerLockRepository& player_lock_repository,
@@ -20,112 +52,164 @@ DungeonService::DungeonService(login_server::session::SessionRepository& session
       battle_context_repository_(battle_context_repository) {}
 
 EnterDungeonResponse DungeonService::EnterDungeon(const EnterDungeonRequest& request) {
-    const auto session = session_repository_.FindById(request.session_id);
-    if (!session.has_value() || session->player_id != request.player_id) {
-        return {false, common::error::ErrorCode::kSessionInvalid, "session invalid", "", 0};
+    if (!HasValidSession(request.session_id, request.player_id)) {
+        return BuildEnterError(common::error::ErrorCode::kSessionInvalid, "session invalid");
     }
 
-    const auto dungeon_config = dungeon_config_repository_.FindByDungeonId(request.dungeon_id);
+    const auto dungeon_config = LoadDungeonConfig(request.dungeon_id);
     if (!dungeon_config.has_value()) {
-        return {false, common::error::ErrorCode::kDungeonNotFound, "dungeon config not found", "", 0};
+        return BuildEnterError(common::error::ErrorCode::kDungeonNotFound, "dungeon config not found");
     }
 
-    if (!AcquirePlayerLock(request.player_id)) {
-        return {false, common::error::ErrorCode::kPlayerBusy, "player is busy", "", 0};
+    ScopedPlayerLock player_lock{
+        [this, player_id = request.player_id] { ReleasePlayerLock(player_id); },
+        AcquirePlayerLock(request.player_id)};
+    if (!player_lock.acquired) {
+        return BuildEnterError(common::error::ErrorCode::kPlayerBusy, "player is busy");
     }
 
-    const auto player_state = player_repository_.LoadPlayerState(request.player_id);
+    const auto player_state = LoadPlayerState(request.player_id);
     if (!player_state.has_value()) {
-        ReleasePlayerLock(request.player_id);
-        return {false, common::error::ErrorCode::kPlayerNotFound, "player not found", "", 0};
+        return BuildEnterError(common::error::ErrorCode::kPlayerNotFound, "player not found");
     }
 
-    if (player_state->profile.level < dungeon_config->required_level) {
-        ReleasePlayerLock(request.player_id);
-        return {false, common::error::ErrorCode::kDungeonLocked, "player level not enough", "", 0};
-    }
-
-    if (player_state->profile.stamina < dungeon_config->cost_stamina) {
-        ReleasePlayerLock(request.player_id);
-        return {false, common::error::ErrorCode::kStaminaNotEnough, "stamina not enough", "", 0};
+    if (const auto validation = ValidateEnterRequirements(*player_state, *dungeon_config); validation.has_value()) {
+        return *validation;
     }
 
     const auto battle_id = GenerateBattleId(request.player_id, request.dungeon_id);
     const auto enter_result = dungeon_repository_.EnterDungeon(*player_state, *dungeon_config, battle_id);
     if (!enter_result.success) {
-        ReleasePlayerLock(request.player_id);
-        const auto code = enter_result.error_message == "stamina not enough" ? common::error::ErrorCode::kStaminaNotEnough
-                          : enter_result.error_message == "unfinished battle exists" ? common::error::ErrorCode::kPlayerBusy
-                                                                              : common::error::ErrorCode::kStorageError;
-        return {false, code, enter_result.error_message, "", 0};
+        return BuildEnterError(MapEnterStorageError(enter_result.error_message), enter_result.error_message);
     }
 
     battle_context_repository_.Save(enter_result.battle_context);
     player_cache_repository_.Invalidate(request.player_id);
-    ReleasePlayerLock(request.player_id);
-    return {true, common::error::ErrorCode::kOk, "", battle_id, enter_result.remain_stamina};
+    return BuildEnterSuccess(std::move(battle_id), enter_result.remain_stamina);
 }
 
 SettleDungeonResponse DungeonService::SettleDungeon(const SettleDungeonRequest& request) {
     if (!request.result) {
-        return {false, common::error::ErrorCode::kStorageError, "only success settlement is supported in demo", false, {}};
+        return BuildSettleError(common::error::ErrorCode::kStorageError, "only success settlement is supported in demo");
     }
 
-    const auto session = session_repository_.FindById(request.session_id);
-    if (!session.has_value() || session->player_id != request.player_id) {
-        return {false, common::error::ErrorCode::kSessionInvalid, "session invalid", false, {}};
+    if (!HasValidSession(request.session_id, request.player_id)) {
+        return BuildSettleError(common::error::ErrorCode::kSessionInvalid, "session invalid");
     }
 
-    const auto dungeon_config = dungeon_config_repository_.FindByDungeonId(request.dungeon_id);
+    const auto dungeon_config = LoadDungeonConfig(request.dungeon_id);
     if (!dungeon_config.has_value()) {
-        return {false, common::error::ErrorCode::kDungeonNotFound, "dungeon config not found", false, {}};
+        return BuildSettleError(common::error::ErrorCode::kDungeonNotFound, "dungeon config not found");
     }
 
-    if (request.star <= 0 || request.star > dungeon_config->max_star) {
-        return {false, common::error::ErrorCode::kInvalidStar, "star is out of range", false, {}};
+    if (const auto validation = ValidateSettleInput(request, *dungeon_config); validation.has_value()) {
+        return *validation;
     }
 
-    if (!AcquirePlayerLock(request.player_id)) {
-        return {false, common::error::ErrorCode::kPlayerBusy, "player is busy", false, {}};
+    ScopedPlayerLock player_lock{
+        [this, player_id = request.player_id] { ReleasePlayerLock(player_id); },
+        AcquirePlayerLock(request.player_id)};
+    if (!player_lock.acquired) {
+        return BuildSettleError(common::error::ErrorCode::kPlayerBusy, "player is busy");
     }
 
-    auto battle_context = battle_context_repository_.FindByBattleId(request.battle_id);
+    const auto battle_context = LoadBattleContext(request.battle_id);
     if (!battle_context.has_value()) {
-        battle_context = dungeon_repository_.FindBattleById(request.battle_id);
-    }
-    if (!battle_context.has_value()) {
-        ReleasePlayerLock(request.player_id);
-        return {false, common::error::ErrorCode::kBattleNotFound, "battle not found", false, {}};
+        return BuildSettleError(common::error::ErrorCode::kBattleNotFound, "battle not found");
     }
 
-    if (battle_context->player_id != request.player_id || battle_context->dungeon_id != request.dungeon_id) {
-        ReleasePlayerLock(request.player_id);
-        return {false, common::error::ErrorCode::kBattleMismatch, "battle context mismatch", false, {}};
-    }
-
-    if (battle_context->settled) {
-        ReleasePlayerLock(request.player_id);
-        return {false, common::error::ErrorCode::kBattleAlreadySettled, "battle already settled", false, {}};
+    if (const auto validation = ValidateBattleContext(request, *battle_context); validation.has_value()) {
+        return *validation;
     }
 
     const auto settle_result = dungeon_repository_.SettleDungeon(*battle_context, *dungeon_config, request.star);
     if (!settle_result.success) {
-        ReleasePlayerLock(request.player_id);
-        const auto code = settle_result.error_message == "battle already settled"
-                              ? common::error::ErrorCode::kBattleAlreadySettled
-                              : common::error::ErrorCode::kStorageError;
-        return {false, code, settle_result.error_message, false, {}};
+        return BuildSettleError(MapSettleStorageError(settle_result.error_message), settle_result.error_message);
     }
 
     battle_context_repository_.Delete(request.battle_id);
     player_cache_repository_.Invalidate(request.player_id);
-    ReleasePlayerLock(request.player_id);
-    return {true, common::error::ErrorCode::kOk, "", settle_result.first_clear, settle_result.rewards};
+    return BuildSettleSuccess(settle_result.first_clear, std::move(settle_result.rewards));
+}
+
+bool DungeonService::HasValidSession(const std::string& session_id, std::int64_t player_id) const {
+    const auto session = session_repository_.FindById(session_id);
+    return session.has_value() && session->player_id == player_id;
+}
+
+std::optional<DungeonConfig> DungeonService::LoadDungeonConfig(int dungeon_id) const {
+    return dungeon_config_repository_.FindByDungeonId(dungeon_id);
+}
+
+std::optional<common::model::PlayerState> DungeonService::LoadPlayerState(std::int64_t player_id) const {
+    return player_repository_.LoadPlayerState(player_id);
+}
+
+std::optional<common::model::BattleContext> DungeonService::LoadBattleContext(const std::string& battle_id) const {
+    if (auto battle_context = battle_context_repository_.FindByBattleId(battle_id); battle_context.has_value()) {
+        return battle_context;
+    }
+    return dungeon_repository_.FindBattleById(battle_id);
+}
+
+std::optional<EnterDungeonResponse> DungeonService::ValidateEnterRequirements(
+    const common::model::PlayerState& player_state,
+    const DungeonConfig& dungeon_config) const {
+    if (player_state.profile.level < dungeon_config.required_level) {
+        return BuildEnterError(common::error::ErrorCode::kDungeonLocked, "player level not enough");
+    }
+
+    if (player_state.profile.stamina < dungeon_config.cost_stamina) {
+        return BuildEnterError(common::error::ErrorCode::kStaminaNotEnough, "stamina not enough");
+    }
+
+    return std::nullopt;
+}
+
+std::optional<SettleDungeonResponse> DungeonService::ValidateSettleInput(
+    const SettleDungeonRequest& request,
+    const DungeonConfig& dungeon_config) const {
+    if (request.star <= 0 || request.star > dungeon_config.max_star) {
+        return BuildSettleError(common::error::ErrorCode::kInvalidStar, "star is out of range");
+    }
+
+    return std::nullopt;
+}
+
+std::optional<SettleDungeonResponse> DungeonService::ValidateBattleContext(
+    const SettleDungeonRequest& request,
+    const common::model::BattleContext& battle_context) const {
+    if (battle_context.player_id != request.player_id || battle_context.dungeon_id != request.dungeon_id) {
+        return BuildSettleError(common::error::ErrorCode::kBattleMismatch, "battle context mismatch");
+    }
+
+    if (battle_context.settled) {
+        return BuildSettleError(common::error::ErrorCode::kBattleAlreadySettled, "battle already settled");
+    }
+
+    return std::nullopt;
+}
+
+common::error::ErrorCode DungeonService::MapEnterStorageError(const std::string& error_message) const {
+    if (error_message == "stamina not enough") {
+        return common::error::ErrorCode::kStaminaNotEnough;
+    }
+    if (error_message == "unfinished battle exists") {
+        return common::error::ErrorCode::kPlayerBusy;
+    }
+    return common::error::ErrorCode::kStorageError;
+}
+
+common::error::ErrorCode DungeonService::MapSettleStorageError(const std::string& error_message) const {
+    if (error_message == "battle already settled") {
+        return common::error::ErrorCode::kBattleAlreadySettled;
+    }
+    return common::error::ErrorCode::kStorageError;
 }
 
 std::string DungeonService::GenerateBattleId(std::int64_t player_id, int dungeon_id) {
     std::ostringstream output;
-    output << "battle-" << player_id << '-' << dungeon_id << '-' << sequence_++;
+    output << "battle-" << player_id << '-' << dungeon_id << '-' << sequence_.fetch_add(1);
     return output.str();
 }
 

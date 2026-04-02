@@ -4,19 +4,24 @@
 
 namespace login_server::auth {
 
-MySqlAccountRepository::MySqlAccountRepository(common::mysql::MySqlClient& mysql_client) : mysql_client_(mysql_client) {}
+MySqlAccountRepository::MySqlAccountRepository(common::mysql::MySqlClientPool& mysql_pool) : mysql_pool_(&mysql_pool) {}
+
+MySqlAccountRepository::MySqlAccountRepository(common::mysql::MySqlClient& mysql_client) : mysql_client_(&mysql_client) {}
 
 std::optional<common::model::Account> MySqlAccountRepository::FindByName(const std::string& account_name) const {
+    auto mysql_lease = mysql_pool_ != nullptr ? std::optional<common::mysql::MySqlClientPool::Lease>(mysql_pool_->Acquire())
+                                              : std::nullopt;
+    auto* mysql = mysql_lease.has_value() ? mysql_lease->operator->() : mysql_client_;
     std::ostringstream sql;
     sql << "SELECT a.account_id, a.account_name, a.password_hash, a.status, "
            "COALESCE(MIN(p.player_id), 0) AS default_player_id "
            "FROM account a "
            "LEFT JOIN player p ON p.account_id = a.account_id "
            "WHERE a.account_name = '"
-        << mysql_client_.Escape(account_name)
+        << mysql->Escape(account_name)
         << "' GROUP BY a.account_id, a.account_name, a.password_hash, a.status LIMIT 1";
 
-    const auto row = mysql_client_.QueryOne(sql.str());
+    const auto row = mysql->QueryOne(sql.str());
     if (!row.has_value()) {
         return std::nullopt;
     }

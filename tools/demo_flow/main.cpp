@@ -2,7 +2,9 @@
 #include "common/error/error_code.h"
 #include "common/log/logger.h"
 #include "common/mysql/mysql_client.h"
+#include "common/mysql/mysql_client_pool.h"
 #include "common/redis/redis_client.h"
+#include "common/redis/redis_client_pool.h"
 #include "dungeon_server/dungeon/dungeon_service.h"
 #include "dungeon_server/dungeon/in_memory_dungeon_config_repository.h"
 #include "dungeon_server/dungeon/mysql_dungeon_repository.h"
@@ -24,7 +26,7 @@ namespace {
 
 struct DemoOptions {
     std::string login_config = "configs/login_server.conf";
-    std::string game_config = "configs/game_server.conf";
+    std::string player_config = "configs/player_server.conf";
     std::string dungeon_config = "configs/dungeon_server.conf";
     std::string account_name = "demo";
     std::string password = "demo123";
@@ -39,8 +41,8 @@ DemoOptions ParseOptions(int argc, char* argv[]) {
         const std::string arg = argv[index];
         if (arg == "--login-config" && index + 1 < argc) {
             options.login_config = argv[++index];
-        } else if (arg == "--game-config" && index + 1 < argc) {
-            options.game_config = argv[++index];
+        } else if ((arg == "--player-config" || arg == "--game-config") && index + 1 < argc) {
+            options.player_config = argv[++index];
         } else if (arg == "--dungeon-config" && index + 1 < argc) {
             options.dungeon_config = argv[++index];
         } else if (arg == "--account" && index + 1 < argc) {
@@ -77,7 +79,7 @@ std::string FormatError(common::error::ErrorCode code, const std::string& messag
 
 void ResetDemoState(common::mysql::MySqlClient& mysql_client,
                     common::redis::RedisClient& redis_client,
-                    const common::config::SimpleConfig& game_config,
+                    const common::config::SimpleConfig& player_config,
                     const common::config::SimpleConfig& dungeon_config,
                     std::int64_t account_id,
                     std::int64_t player_id) {
@@ -89,9 +91,9 @@ void ResetDemoState(common::mysql::MySqlClient& mysql_client,
                          " AND dungeon_id = " + std::to_string(dungeon_id));
 
     std::ostringstream asset_sql;
-    asset_sql << "UPDATE player_asset SET stamina = " << game_config.GetInt("demo.stamina", 120)
-              << ", gold = " << game_config.GetInt("demo.gold", 1000)
-              << ", diamond = " << game_config.GetInt("demo.diamond", 100)
+    asset_sql << "UPDATE player_asset SET stamina = " << player_config.GetInt("demo.stamina", 120)
+              << ", gold = " << player_config.GetInt("demo.gold", 1000)
+              << ", diamond = " << player_config.GetInt("demo.diamond", 100)
               << " WHERE player_id = " << player_id;
     mysql_client.Execute(asset_sql.str());
 
@@ -137,28 +139,40 @@ int main(int argc, char* argv[]) {
     const auto options = ParseOptions(argc, argv);
 
     common::config::SimpleConfig login_config;
-    common::config::SimpleConfig game_config;
+    common::config::SimpleConfig player_config;
     common::config::SimpleConfig dungeon_config;
     if (!LoadConfig(options.login_config, login_config) ||
-        !LoadConfig(options.game_config, game_config) ||
+        !LoadConfig(options.player_config, player_config) ||
         !LoadConfig(options.dungeon_config, dungeon_config)) {
         return 1;
     }
 
-    common::mysql::MySqlClient mysql_client(common::mysql::ReadConnectionOptions(game_config));
+    common::mysql::MySqlClient mysql_client(common::mysql::ReadConnectionOptions(player_config));
     std::string error_message;
     if (!mysql_client.Connect(&error_message)) {
         common::log::Logger::Instance().Log(common::log::LogLevel::kError, "mysql connect failed: " + error_message);
         return 1;
     }
 
-    common::redis::RedisClient redis_client(common::redis::ReadConnectionOptions(game_config));
+    common::redis::RedisClient redis_client(common::redis::ReadConnectionOptions(player_config));
     if (!redis_client.Connect(&error_message)) {
         common::log::Logger::Instance().Log(common::log::LogLevel::kError, "redis connect failed: " + error_message);
         return 1;
     }
 
-    login_server::auth::MySqlAccountRepository account_repository(mysql_client);
+    common::mysql::MySqlClientPool mysql_pool(common::mysql::ReadConnectionOptions(player_config), 1);
+    if (!mysql_pool.Initialize(&error_message)) {
+        common::log::Logger::Instance().Log(common::log::LogLevel::kError, "mysql pool init failed: " + error_message);
+        return 1;
+    }
+
+    common::redis::RedisClientPool redis_pool(common::redis::ReadConnectionOptions(player_config), 1);
+    if (!redis_pool.Initialize(&error_message)) {
+        common::log::Logger::Instance().Log(common::log::LogLevel::kError, "redis pool init failed: " + error_message);
+        return 1;
+    }
+
+    login_server::auth::MySqlAccountRepository account_repository(mysql_pool);
     const auto demo_account = account_repository.FindByName(options.account_name);
     if (!Require(demo_account.has_value(), "demo account not found in mysql")) {
         return 1;
@@ -166,21 +180,21 @@ int main(int argc, char* argv[]) {
 
     if (options.reset_demo_state) {
         ResetDemoState(
-            mysql_client, redis_client, game_config, dungeon_config, demo_account->account_id, demo_account->default_player_id);
+            mysql_client, redis_client, player_config, dungeon_config, demo_account->account_id, demo_account->default_player_id);
     }
 
-    auto session_repository = login_server::session::RedisSessionRepository::FromConfig(redis_client, login_config);
+    auto session_repository = login_server::session::RedisSessionRepository::FromConfig(redis_pool, login_config);
     login_server::LoginService login_service(account_repository, session_repository);
 
-    game_server::player::MySqlPlayerRepository player_repository(mysql_client);
-    auto player_cache_repository = game_server::player::RedisPlayerCacheRepository::FromConfig(redis_client, game_config);
+    game_server::player::MySqlPlayerRepository player_repository(mysql_pool);
+    auto player_cache_repository = game_server::player::RedisPlayerCacheRepository::FromConfig(redis_pool, player_config);
     game_server::player::PlayerService player_service(session_repository, player_repository, player_cache_repository);
 
     auto dungeon_config_repository = dungeon_server::dungeon::InMemoryDungeonConfigRepository::FromConfig(dungeon_config);
-    dungeon_server::dungeon::MySqlDungeonRepository dungeon_repository(mysql_client);
-    auto battle_context_repository = dungeon_server::dungeon::RedisBattleContextRepository::FromConfig(redis_client, dungeon_config);
+    dungeon_server::dungeon::MySqlDungeonRepository dungeon_repository(mysql_pool);
+    auto battle_context_repository = dungeon_server::dungeon::RedisBattleContextRepository::FromConfig(redis_pool, dungeon_config);
     dungeon_server::dungeon::RedisPlayerLockRepository player_lock_repository(
-        redis_client, dungeon_config.GetInt("ttl.player_lock_seconds", 10));
+        redis_pool, dungeon_config.GetInt("ttl.player_lock_seconds", 10));
     dungeon_server::dungeon::DungeonService dungeon_service(session_repository,
                                                             player_lock_repository,
                                                             player_repository,

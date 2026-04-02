@@ -5,15 +5,16 @@
 
 namespace login_server::session {
 
-RedisSessionRepository RedisSessionRepository::FromConfig(common::redis::RedisClient& redis_client,
+RedisSessionRepository RedisSessionRepository::FromConfig(common::redis::RedisClientPool& redis_pool,
                                                           const common::config::SimpleConfig& config) {
-    return RedisSessionRepository(redis_client, config.GetInt("session.ttl_seconds", 3600));
+    return RedisSessionRepository(redis_pool, config.GetInt("storage.session.ttl_seconds", 3600));
 }
 
-RedisSessionRepository::RedisSessionRepository(common::redis::RedisClient& redis_client, int session_ttl_seconds)
-    : redis_client_(redis_client), session_ttl_seconds_(session_ttl_seconds) {}
+RedisSessionRepository::RedisSessionRepository(common::redis::RedisClientPool& redis_pool, int session_ttl_seconds)
+    : redis_pool_(redis_pool), session_ttl_seconds_(session_ttl_seconds) {}
 
 common::model::Session RedisSessionRepository::Create(std::int64_t account_id, std::int64_t player_id) {
+    auto redis = redis_pool_.Acquire();
     common::model::Session session;
     session.account_id = account_id;
     session.player_id = player_id;
@@ -27,21 +28,22 @@ common::model::Session RedisSessionRepository::Create(std::int64_t account_id, s
     session.session_id = session_id.str();
 
     const auto account_key = AccountSessionKey(account_id);
-    if (const auto old_session = redis_client_.Get(account_key); old_session.has_value()) {
-        redis_client_.Del(SessionKey(*old_session));
+    if (const auto old_session = redis->Get(account_key); old_session.has_value()) {
+        redis->Del(SessionKey(*old_session));
     }
 
-    redis_client_.HSet(SessionKey(session.session_id),
-                       {{"account_id", std::to_string(session.account_id)},
-                        {"player_id", std::to_string(session.player_id)},
-                        {"created_at_epoch_seconds", std::to_string(session.created_at_epoch_seconds)}},
-                       session_ttl_seconds_);
-    redis_client_.Set(account_key, session.session_id, session_ttl_seconds_);
+    redis->HSet(SessionKey(session.session_id),
+                {{"account_id", std::to_string(session.account_id)},
+                 {"player_id", std::to_string(session.player_id)},
+                 {"created_at_epoch_seconds", std::to_string(session.created_at_epoch_seconds)}},
+                session_ttl_seconds_);
+    redis->Set(account_key, session.session_id, session_ttl_seconds_);
     return session;
 }
 
 std::optional<common::model::Session> RedisSessionRepository::FindById(const std::string& session_id) const {
-    const auto values = redis_client_.HGetAll(SessionKey(session_id));
+    auto redis = redis_pool_.Acquire();
+    const auto values = redis->HGetAll(SessionKey(session_id));
     if (!values.has_value() || values->empty()) {
         return std::nullopt;
     }

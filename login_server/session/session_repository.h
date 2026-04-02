@@ -8,6 +8,7 @@
 
 namespace login_server::session {
 
+// Storage boundary for session creation and lookup.
 class SessionRepository {
 public:
     virtual ~SessionRepository() = default;
@@ -17,4 +18,3 @@ public:
 };
 
 }  // namespace login_server::session
-

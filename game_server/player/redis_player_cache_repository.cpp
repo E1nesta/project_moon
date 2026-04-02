@@ -20,16 +20,17 @@ std::vector<std::string> Split(const std::string& input, char separator) {
 
 }  // namespace
 
-RedisPlayerCacheRepository RedisPlayerCacheRepository::FromConfig(common::redis::RedisClient& redis_client,
+RedisPlayerCacheRepository RedisPlayerCacheRepository::FromConfig(common::redis::RedisClientPool& redis_pool,
                                                                   const common::config::SimpleConfig& config) {
-    return RedisPlayerCacheRepository(redis_client, config.GetInt("player.snapshot_ttl_seconds", 300));
+    return RedisPlayerCacheRepository(redis_pool, config.GetInt("storage.player.snapshot_ttl_seconds", 300));
 }
 
-RedisPlayerCacheRepository::RedisPlayerCacheRepository(common::redis::RedisClient& redis_client, int ttl_seconds)
-    : redis_client_(redis_client), ttl_seconds_(ttl_seconds) {}
+RedisPlayerCacheRepository::RedisPlayerCacheRepository(common::redis::RedisClientPool& redis_pool, int ttl_seconds)
+    : redis_pool_(redis_pool), ttl_seconds_(ttl_seconds) {}
 
 bool RedisPlayerCacheRepository::Save(const common::model::PlayerState& player_state) {
-    return redis_client_.HSet(
+    auto redis = redis_pool_.Acquire();
+    return redis->HSet(
         CacheKey(player_state.profile.player_id),
         {{"player_id", std::to_string(player_state.profile.player_id)},
          {"account_id", std::to_string(player_state.profile.account_id)},
@@ -43,7 +44,8 @@ bool RedisPlayerCacheRepository::Save(const common::model::PlayerState& player_s
 }
 
 std::optional<common::model::PlayerState> RedisPlayerCacheRepository::FindByPlayerId(std::int64_t player_id) const {
-    const auto values = redis_client_.HGetAll(CacheKey(player_id));
+    auto redis = redis_pool_.Acquire();
+    const auto values = redis->HGetAll(CacheKey(player_id));
     if (!values.has_value() || values->empty()) {
         return std::nullopt;
     }
@@ -61,7 +63,8 @@ std::optional<common::model::PlayerState> RedisPlayerCacheRepository::FindByPlay
 }
 
 bool RedisPlayerCacheRepository::Invalidate(std::int64_t player_id) {
-    return redis_client_.Del(CacheKey(player_id));
+    auto redis = redis_pool_.Acquire();
+    return redis->Del(CacheKey(player_id));
 }
 
 std::string RedisPlayerCacheRepository::CacheKey(std::int64_t player_id) {

@@ -9,6 +9,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     pkg-config \
     protobuf-compiler \
     libprotobuf-dev \
+    libboost-dev \
+    libboost-system-dev \
     default-libmysqlclient-dev \
     libhiredis-dev \
     libssl-dev \
@@ -27,15 +29,17 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     libprotobuf-dev \
+    libboost-dev \
+    libboost-system-dev \
     default-libmysqlclient-dev \
     libhiredis-dev \
     libssl-dev \
     netcat-openbsd \
     && rm -rf /var/lib/apt/lists/*
 
-COPY --from=builder /src/build/gateway /app/gateway
+COPY --from=builder /src/build/gateway_server /app/gateway_server
 COPY --from=builder /src/build/login_server /app/login_server
-COPY --from=builder /src/build/game_server /app/game_server
+COPY --from=builder /src/build/player_server /app/player_server
 COPY --from=builder /src/build/dungeon_server /app/dungeon_server
 COPY --from=builder /src/build/service_check /app/service_check
 COPY --from=builder /src/build/password_tool /app/password_tool
@@ -43,4 +47,4 @@ COPY --from=builder /src/build/demo_flow /app/demo_flow
 COPY --from=builder /src/build/demo_client /app/demo_client
 COPY --from=builder /src/configs /app/configs
 
-CMD ["./gateway", "--config", "configs/gateway_1.conf"]
+CMD ["./gateway_server", "--config", "configs/gateway_server.conf"]

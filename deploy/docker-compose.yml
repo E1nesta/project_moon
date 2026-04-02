@@ -60,16 +60,16 @@ services:
       timeout: 3s
       retries: 20
 
-  game_server:
+  player_server:
     <<: *backend-service
-    command: ["./game_server", "--config", "configs/demo/game_server.conf"]
+    command: ["./player_server", "--config", "configs/demo/player_server.conf"]
     depends_on:
       mysql:
         condition: service_healthy
       redis:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "./service_check", "--config", "configs/demo/game_server.conf", "--mode", "ready"]
+      test: ["CMD", "./service_check", "--config", "configs/demo/player_server.conf", "--mode", "ready"]
       interval: 5s
       timeout: 3s
       retries: 20
@@ -90,36 +90,36 @@ services:
 
   gateway_1:
     <<: *backend-service
-    command: ["./gateway", "--config", "configs/demo/gateway_1.conf"]
+    command: ["./gateway_server", "--config", "configs/demo/gateway_server_1.conf"]
     depends_on:
       redis:
         condition: service_healthy
       login_server:
         condition: service_healthy
-      game_server:
+      player_server:
         condition: service_healthy
       dungeon_server:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "./service_check", "--config", "configs/demo/gateway_1.conf", "--mode", "ready"]
+      test: ["CMD", "./service_check", "--config", "configs/demo/gateway_server_1.conf", "--mode", "ready"]
       interval: 5s
       timeout: 3s
       retries: 20
 
   gateway_2:
     <<: *backend-service
-    command: ["./gateway", "--config", "configs/demo/gateway_2.conf"]
+    command: ["./gateway_server", "--config", "configs/demo/gateway_server_2.conf"]
     depends_on:
       redis:
         condition: service_healthy
       login_server:
         condition: service_healthy
-      game_server:
+      player_server:
         condition: service_healthy
       dungeon_server:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "./service_check", "--config", "configs/demo/gateway_2.conf", "--mode", "ready"]
+      test: ["CMD", "./service_check", "--config", "configs/demo/gateway_server_2.conf", "--mode", "ready"]
       interval: 5s
       timeout: 3s
       retries: 20

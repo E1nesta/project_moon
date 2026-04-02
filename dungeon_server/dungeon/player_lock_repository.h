@@ -4,6 +4,7 @@
 
 namespace dungeon_server::dungeon {
 
+// Storage boundary for per-player concurrency control.
 class PlayerLockRepository {
 public:
     virtual ~PlayerLockRepository() = default;

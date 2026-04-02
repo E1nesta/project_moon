@@ -7,6 +7,7 @@
 
 namespace game_server::player {
 
+// Storage boundary for player snapshot caching.
 class PlayerCacheRepository {
 public:
     virtual ~PlayerCacheRepository() = default;

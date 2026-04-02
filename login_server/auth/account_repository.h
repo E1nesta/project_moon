@@ -7,6 +7,7 @@
 
 namespace login_server::auth {
 
+// Storage boundary for account lookup used by the login application service.
 class AccountRepository {
 public:
     virtual ~AccountRepository() = default;
@@ -15,4 +16,3 @@ public:
 };
 
 }  // namespace login_server::auth
-

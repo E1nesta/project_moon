@@ -7,6 +7,7 @@
 
 namespace game_server::player {
 
+// Storage boundary for player state reads from the system of record.
 class PlayerRepository {
 public:
     virtual ~PlayerRepository() = default;

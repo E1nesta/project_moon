@@ -7,6 +7,7 @@
 
 namespace dungeon_server::dungeon {
 
+// Storage boundary for transient battle context persistence.
 class BattleContextRepository {
 public:
     virtual ~BattleContextRepository() = default;

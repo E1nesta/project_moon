@@ -5,8 +5,8 @@
 #include "common/net/message_id.h"
 #include "common/net/proto_codec.h"
 #include "common/net/proto_mapper.h"
-#include "common/net/tcp_client.h"
 #include "common/redis/redis_client.h"
+#include "framework/transport/transport_client.h"
 #include "login_server/auth/mysql_account_repository.h"
 
 #include "game_backend.pb.h"
@@ -29,9 +29,9 @@ enum class DemoScenario {
 
 struct DemoOptions {
     std::string config_profile = "local";
-    std::string gateway_config = "configs/local/gateway.conf";
+    std::string gateway_config = "configs/local/gateway_server.conf";
     std::string login_config = "configs/local/login_server.conf";
-    std::string game_config = "configs/local/game_server.conf";
+    std::string player_config = "configs/local/player_server.conf";
     std::string dungeon_config = "configs/local/dungeon_server.conf";
     std::string account_name = "demo";
     std::string password = "demo123";
@@ -126,27 +126,26 @@ DemoOptions ParseOptions(int argc, char* argv[]) {
             if (options.config_profile == "demo") {
                 options.gateway_config = "configs/demo/gateway_client.conf";
                 options.login_config = "configs/demo/login_server.conf";
-                options.game_config = "configs/demo/game_server.conf";
+                options.player_config = "configs/demo/player_server.conf";
                 options.dungeon_config = "configs/demo/dungeon_server.conf";
             } else if (options.config_profile == "delivery") {
                 options.gateway_config = "configs/delivery/gateway_client.conf";
                 options.login_config = "configs/delivery/login_server.conf";
-                options.game_config = "configs/delivery/game_server.conf";
+                options.player_config = "configs/delivery/player_server.conf";
                 options.dungeon_config = "configs/delivery/dungeon_server.conf";
             } else {
                 options.config_profile = "local";
-                options.gateway_config = "configs/local/gateway.conf";
+                options.gateway_config = "configs/local/gateway_server.conf";
                 options.login_config = "configs/local/login_server.conf";
-                options.game_config = "configs/local/game_server.conf";
+                options.player_config = "configs/local/player_server.conf";
                 options.dungeon_config = "configs/local/dungeon_server.conf";
             }
-        } else
-        if (arg == "--gateway-config" && index + 1 < argc) {
+        } else if (arg == "--gateway-config" && index + 1 < argc) {
             options.gateway_config = argv[++index];
         } else if (arg == "--login-config" && index + 1 < argc) {
             options.login_config = argv[++index];
-        } else if (arg == "--game-config" && index + 1 < argc) {
-            options.game_config = argv[++index];
+        } else if ((arg == "--player-config" || arg == "--game-config") && index + 1 < argc) {
+            options.player_config = argv[++index];
         } else if (arg == "--dungeon-config" && index + 1 < argc) {
             options.dungeon_config = argv[++index];
         } else if (arg == "--account" && index + 1 < argc) {
@@ -264,7 +263,7 @@ common::net::RequestContext BuildContext(std::uint64_t request_id,
 
 void ResetDemoState(common::mysql::MySqlClient& mysql_client,
                     common::redis::RedisClient& redis_client,
-                    const common::config::SimpleConfig& game_config,
+                    const common::config::SimpleConfig& player_config,
                     const common::config::SimpleConfig& dungeon_config,
                     std::int64_t account_id,
                     std::int64_t player_id) {
@@ -276,9 +275,9 @@ void ResetDemoState(common::mysql::MySqlClient& mysql_client,
                          " AND dungeon_id = " + std::to_string(dungeon_id));
 
     std::ostringstream asset_sql;
-    asset_sql << "UPDATE player_asset SET stamina = " << game_config.GetInt("demo.stamina", 120)
-              << ", gold = " << game_config.GetInt("demo.gold", 1000)
-              << ", diamond = " << game_config.GetInt("demo.diamond", 100)
+    asset_sql << "UPDATE player_asset SET stamina = " << player_config.GetInt("demo.stamina", 120)
+              << ", gold = " << player_config.GetInt("demo.gold", 1000)
+              << ", diamond = " << player_config.GetInt("demo.diamond", 100)
               << " WHERE player_id = " << player_id;
     mysql_client.Execute(asset_sql.str());
 
@@ -294,7 +293,7 @@ void ResetDemoState(common::mysql::MySqlClient& mysql_client,
 }
 
 template <typename RequestT>
-CallResult SendMessage(common::net::PersistentTcpClient& client,
+CallResult SendMessage(framework::transport::TransportClient& client,
                        common::net::MessageId message_id,
                        const common::net::RequestContext& context,
                        RequestT* request) {
@@ -347,18 +346,18 @@ int main(int argc, char* argv[]) {
 
     common::config::SimpleConfig gateway_config;
     common::config::SimpleConfig login_config;
-    common::config::SimpleConfig game_config;
+    common::config::SimpleConfig player_config;
     common::config::SimpleConfig dungeon_config;
     if (!LoadConfig(options.gateway_config, gateway_config) ||
         !LoadConfig(options.login_config, login_config) ||
-        !LoadConfig(options.game_config, game_config) ||
+        !LoadConfig(options.player_config, player_config) ||
         !LoadConfig(options.dungeon_config, dungeon_config)) {
         return 1;
     }
 
     if (options.reset_demo_state) {
-        common::mysql::MySqlClient mysql_client(common::mysql::ReadConnectionOptions(game_config));
-        common::redis::RedisClient redis_client(common::redis::ReadConnectionOptions(game_config));
+        common::mysql::MySqlClient mysql_client(common::mysql::ReadConnectionOptions(player_config));
+        common::redis::RedisClient redis_client(common::redis::ReadConnectionOptions(player_config));
         std::string error_message;
         if (!mysql_client.Connect(&error_message)) {
             common::log::Logger::Instance().Log(common::log::LogLevel::kError, "mysql connect failed: " + error_message);
@@ -376,16 +375,16 @@ int main(int argc, char* argv[]) {
         }
 
         ResetDemoState(
-            mysql_client, redis_client, game_config, dungeon_config, demo_account->account_id, demo_account->default_player_id);
+            mysql_client, redis_client, player_config, dungeon_config, demo_account->account_id, demo_account->default_player_id);
     }
 
     const auto gateway_host = gateway_config.GetString("client.host", "127.0.0.1");
     const auto gateway_port = gateway_config.GetInt("port", 7000);
     const auto gateway_timeout_ms = gateway_config.GetInt("client.timeout_ms", 3000);
 
-    common::net::PersistentTcpClient primary_client(gateway_host, gateway_port, gateway_timeout_ms);
-    common::net::PersistentTcpClient recovery_client(gateway_host, gateway_port, gateway_timeout_ms);
-    common::net::PersistentTcpClient* active_client = &primary_client;
+    framework::transport::TransportClient primary_client(gateway_host, gateway_port, gateway_timeout_ms);
+    framework::transport::TransportClient recovery_client(gateway_host, gateway_port, gateway_timeout_ms);
+    framework::transport::TransportClient* active_client = &primary_client;
 
     std::uint64_t request_id = 1;
 
