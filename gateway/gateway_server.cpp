@@ -38,9 +38,19 @@ void LogGateway(const common::net::RequestContext& context, const std::string& m
 
 }  // namespace
 
-GatewayServer::GatewayServer(common::config::SimpleConfig config) : config_(std::move(config)) {}
+GatewayServer::GatewayServer(common::config::SimpleConfig config)
+    : config_(std::move(config)),
+      redis_client_(common::redis::ReadConnectionOptions(config_)) {}
 
 bool GatewayServer::Initialize(std::string* error_message) {
+    instance_id_ = config_.GetString("instance.id", config_.GetString("service.name", "gateway"));
+    if (!redis_client_.Connect(error_message)) {
+        return false;
+    }
+
+    session_repository_ = std::make_unique<login_server::session::RedisSessionRepository>(
+        redis_client_, config_.GetInt("session.ttl_seconds", 3600));
+
     const auto timeout_ms = config_.GetInt("upstream.timeout_ms", 3000);
     const auto pool_size = config_.GetInt("upstream.pool_size", 2);
 
@@ -107,10 +117,21 @@ std::optional<common::net::Packet> GatewayServer::HandlePacket(const common::net
 
     if (*maybe_message_id != common::net::MessageId::kLoginRequest) {
         const auto binding_iter = client_bindings_.find(incoming.connection_id);
-        if (binding_iter == client_bindings_.end() || binding_iter->second.session_id != context.session_id ||
-            binding_iter->second.player_id != context.player_id) {
-            return common::net::BuildErrorPacket(
-                context, common::error::ErrorCode::kSessionInvalid, "connection session binding mismatch");
+        if (binding_iter != client_bindings_.end()) {
+            if (binding_iter->second.session_id != context.session_id || binding_iter->second.player_id != context.player_id) {
+                return common::net::BuildErrorPacket(
+                    context, common::error::ErrorCode::kSessionInvalid, "connection session binding mismatch");
+            }
+        } else {
+            const auto restored_binding = RestoreBindingFromSession(context);
+            if (!restored_binding.has_value()) {
+                LogGateway(context, "session restore failed on " + instance_id_);
+                return common::net::BuildErrorPacket(
+                    context, common::error::ErrorCode::kSessionInvalid, "session restore failed");
+            }
+
+            client_bindings_[incoming.connection_id] = *restored_binding;
+            LogGateway(context, "bind restored from redis on " + instance_id_);
         }
     }
 
@@ -150,6 +171,10 @@ std::optional<common::net::Packet> GatewayServer::HandlePacket(const common::net
         }
         if (response.success()) {
             client_bindings_[incoming.connection_id] = {response.session_id(), response.player_id()};
+            common::net::RequestContext bound_context = context;
+            bound_context.session_id = response.session_id();
+            bound_context.player_id = response.player_id();
+            LogGateway(bound_context, "login bound on " + instance_id_);
         }
     }
 
@@ -175,6 +200,20 @@ common::error::ErrorCode GatewayServer::MapUpstreamError(const std::string& erro
         return common::error::ErrorCode::kUpstreamTimeout;
     }
     return common::error::ErrorCode::kServiceUnavailable;
+}
+
+std::optional<GatewayServer::ClientBinding> GatewayServer::RestoreBindingFromSession(
+    const common::net::RequestContext& context) const {
+    if (context.session_id.empty() || context.player_id == 0 || session_repository_ == nullptr) {
+        return std::nullopt;
+    }
+
+    const auto session = session_repository_->FindById(context.session_id);
+    if (!session.has_value() || session->player_id != context.player_id) {
+        return std::nullopt;
+    }
+
+    return ClientBinding{session->session_id, session->player_id};
 }
 
 }  // namespace gateway

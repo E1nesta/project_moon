@@ -43,11 +43,12 @@ int main(int argc, char* argv[]) {
 
     common::config::SimpleConfig config;
     auto& logger = common::log::Logger::Instance();
-    logger.SetServiceName("gateway");
     if (!config.LoadFromFile(options.config_path)) {
+        logger.SetServiceName(options.service_name);
         logger.Log(common::log::LogLevel::kError, "failed to load config file: " + options.config_path);
         return 1;
     }
+    logger.SetServiceName(config.GetString("service.name", options.service_name));
 
     gateway::GatewayServer server(config);
     std::string error_message;

@@ -12,11 +12,20 @@
 #include "game_backend.pb.h"
 
 #include <cstdint>
+#include <iostream>
+#include <optional>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace {
+
+enum class DemoScenario {
+    kFull,
+    kLoginOnly,
+    kLoadOnly,
+};
 
 struct DemoOptions {
     std::string gateway_config = "configs/gateway.conf";
@@ -27,6 +36,12 @@ struct DemoOptions {
     std::string password = "demo123";
     bool reset_demo_state = true;
     bool run_negative_cases = true;
+    bool verify_session_recovery = true;
+    DemoScenario scenario = DemoScenario::kFull;
+    std::string session_id;
+    std::int64_t player_id = 0;
+    std::optional<common::error::ErrorCode> expected_load_error;
+    std::optional<common::error::ErrorCode> expected_enter_error;
 };
 
 struct CallResult {
@@ -35,6 +50,70 @@ struct CallResult {
     std::string error_message;
     common::net::Packet packet;
 };
+
+std::optional<common::error::ErrorCode> ParseErrorCode(std::string_view value) {
+    using common::error::ErrorCode;
+
+    if (value == "OK") {
+        return ErrorCode::kOk;
+    }
+    if (value == "ACCOUNT_NOT_FOUND") {
+        return ErrorCode::kAccountNotFound;
+    }
+    if (value == "ACCOUNT_DISABLED") {
+        return ErrorCode::kAccountDisabled;
+    }
+    if (value == "INVALID_PASSWORD") {
+        return ErrorCode::kInvalidPassword;
+    }
+    if (value == "SESSION_INVALID") {
+        return ErrorCode::kSessionInvalid;
+    }
+    if (value == "PLAYER_NOT_FOUND") {
+        return ErrorCode::kPlayerNotFound;
+    }
+    if (value == "PLAYER_BUSY") {
+        return ErrorCode::kPlayerBusy;
+    }
+    if (value == "DUNGEON_NOT_FOUND") {
+        return ErrorCode::kDungeonNotFound;
+    }
+    if (value == "DUNGEON_LOCKED") {
+        return ErrorCode::kDungeonLocked;
+    }
+    if (value == "STAMINA_NOT_ENOUGH") {
+        return ErrorCode::kStaminaNotEnough;
+    }
+    if (value == "BATTLE_NOT_FOUND") {
+        return ErrorCode::kBattleNotFound;
+    }
+    if (value == "BATTLE_MISMATCH") {
+        return ErrorCode::kBattleMismatch;
+    }
+    if (value == "BATTLE_ALREADY_SETTLED") {
+        return ErrorCode::kBattleAlreadySettled;
+    }
+    if (value == "INVALID_DUNGEON_ID") {
+        return ErrorCode::kInvalidDungeonId;
+    }
+    if (value == "INVALID_STAR") {
+        return ErrorCode::kInvalidStar;
+    }
+    if (value == "STORAGE_ERROR") {
+        return ErrorCode::kStorageError;
+    }
+    if (value == "SERVICE_UNAVAILABLE") {
+        return ErrorCode::kServiceUnavailable;
+    }
+    if (value == "UPSTREAM_TIMEOUT") {
+        return ErrorCode::kUpstreamTimeout;
+    }
+    if (value == "BAD_GATEWAY") {
+        return ErrorCode::kBadGateway;
+    }
+
+    return std::nullopt;
+}
 
 DemoOptions ParseOptions(int argc, char* argv[]) {
     DemoOptions options;
@@ -57,6 +136,30 @@ DemoOptions ParseOptions(int argc, char* argv[]) {
             options.reset_demo_state = false;
         } else if (arg == "--happy-path-only") {
             options.run_negative_cases = false;
+        } else if (arg == "--skip-session-recovery") {
+            options.verify_session_recovery = false;
+        } else if (arg == "--scenario" && index + 1 < argc) {
+            const std::string value = argv[++index];
+            if (value == "full") {
+                options.scenario = DemoScenario::kFull;
+            } else if (value == "login-only") {
+                options.scenario = DemoScenario::kLoginOnly;
+                options.run_negative_cases = false;
+                options.verify_session_recovery = false;
+            } else if (value == "load-only") {
+                options.scenario = DemoScenario::kLoadOnly;
+                options.run_negative_cases = false;
+                options.verify_session_recovery = false;
+                options.reset_demo_state = false;
+            }
+        } else if (arg == "--session-id" && index + 1 < argc) {
+            options.session_id = argv[++index];
+        } else if (arg == "--player-id" && index + 1 < argc) {
+            options.player_id = std::stoll(argv[++index]);
+        } else if (arg == "--expect-load-error" && index + 1 < argc) {
+            options.expected_load_error = ParseErrorCode(argv[++index]);
+        } else if (arg == "--expect-enter-error" && index + 1 < argc) {
+            options.expected_enter_error = ParseErrorCode(argv[++index]);
         }
     }
 
@@ -88,6 +191,29 @@ bool Require(bool condition, const std::string& message) {
 
     common::log::Logger::Instance().Log(common::log::LogLevel::kError, message);
     return false;
+}
+
+bool RequireExpectedError(const CallResult& result,
+                          common::error::ErrorCode expected_error,
+                          const std::string& label) {
+    if (result.ok) {
+        common::log::Logger::Instance().Log(common::log::LogLevel::kError,
+                                            label + " should fail with " +
+                                                std::string(common::error::ToString(expected_error)));
+        return false;
+    }
+
+    if (result.error_code != expected_error) {
+        common::log::Logger::Instance().Log(common::log::LogLevel::kError,
+                                            label + " failed with " + FormatError(result.error_code, result.error_message) +
+                                                ", expected error_code=" + std::string(common::error::ToString(expected_error)));
+        return false;
+    }
+
+    common::log::Logger::Instance().Log(common::log::LogLevel::kInfo,
+                                        label + " produced expected error_code=" +
+                                            std::string(common::error::ToString(expected_error)));
+    return true;
 }
 
 void LogRewards(const google::protobuf::RepeatedPtrField<game_backend::proto::Reward>& rewards) {
@@ -232,16 +358,62 @@ int main(int argc, char* argv[]) {
             mysql_client, redis_client, game_config, dungeon_config, demo_account->account_id, demo_account->default_player_id);
     }
 
-    common::net::PersistentTcpClient client(gateway_config.GetString("client.host", "127.0.0.1"),
-                                            gateway_config.GetInt("port", 7000),
-                                            gateway_config.GetInt("client.timeout_ms", 3000));
+    const auto gateway_host = gateway_config.GetString("client.host", "127.0.0.1");
+    const auto gateway_port = gateway_config.GetInt("port", 7000);
+    const auto gateway_timeout_ms = gateway_config.GetInt("client.timeout_ms", 3000);
+
+    common::net::PersistentTcpClient primary_client(gateway_host, gateway_port, gateway_timeout_ms);
+    common::net::PersistentTcpClient recovery_client(gateway_host, gateway_port, gateway_timeout_ms);
+    common::net::PersistentTcpClient* active_client = &primary_client;
 
     std::uint64_t request_id = 1;
+
+    if (options.scenario == DemoScenario::kLoadOnly) {
+        if (!Require(!options.session_id.empty(), "load-only scenario requires --session-id")) {
+            return 1;
+        }
+        if (!Require(options.player_id != 0, "load-only scenario requires --player-id")) {
+            return 1;
+        }
+
+        game_backend::proto::LoadPlayerRequest load_request;
+        load_request.set_player_id(options.player_id);
+        const auto load_call = SendMessage(primary_client,
+                                           common::net::MessageId::kLoadPlayerRequest,
+                                           BuildContext(request_id++, options.session_id, options.player_id),
+                                           &load_request);
+        if (options.expected_load_error.has_value()) {
+            return RequireExpectedError(load_call, *options.expected_load_error, "load-only request") ? 0 : 1;
+        }
+        if (!Require(load_call.ok, "load-only request failed: " + FormatError(load_call.error_code, load_call.error_message))) {
+            return 1;
+        }
+
+        game_backend::proto::LoadPlayerResponse load_response;
+        if (!Require(common::net::ParseMessage(load_call.packet.body, &load_response),
+                     "failed to parse load-only response")) {
+            return 1;
+        }
+        if (!Require(load_response.success(),
+                     "load-only request failed: " +
+                         FormatError(static_cast<common::error::ErrorCode>(load_response.error_code()),
+                                     load_response.error_message()))) {
+            return 1;
+        }
+
+        std::ostringstream summary;
+        summary << "load-only success"
+                << ", player_id=" << load_response.player_state().profile().player_id()
+                << ", cache=" << (load_response.loaded_from_cache() ? "hit" : "miss");
+        common::log::Logger::Instance().Log(common::log::LogLevel::kInfo, summary.str());
+        return 0;
+    }
+
     game_backend::proto::LoginRequest login_request;
     login_request.set_account_name(options.account_name);
     login_request.set_password(options.password);
     const auto login_call =
-        SendMessage(client, common::net::MessageId::kLoginRequest, BuildContext(request_id++), &login_request);
+        SendMessage(primary_client, common::net::MessageId::kLoginRequest, BuildContext(request_id++), &login_request);
     if (!Require(login_call.ok, "login failed: " + FormatError(login_call.error_code, login_call.error_message))) {
         return 1;
     }
@@ -264,9 +436,49 @@ int main(int argc, char* argv[]) {
                   << ", player_id=" << login_response.player_id();
     common::log::Logger::Instance().Log(common::log::LogLevel::kInfo, login_summary.str());
 
+    if (options.scenario == DemoScenario::kLoginOnly) {
+        std::cout << "SESSION_ID=" << login_response.session_id() << '\n';
+        std::cout << "ACCOUNT_ID=" << login_response.account_id() << '\n';
+        std::cout << "PLAYER_ID=" << login_response.player_id() << '\n';
+        return 0;
+    }
+
     game_backend::proto::LoadPlayerRequest load_request;
     load_request.set_player_id(login_response.player_id());
-    const auto load_call = SendMessage(client,
+    if (options.verify_session_recovery) {
+        const auto recovery_call = SendMessage(recovery_client,
+                                               common::net::MessageId::kLoadPlayerRequest,
+                                               BuildContext(request_id++, login_response.session_id(), login_response.player_id()),
+                                               &load_request);
+        if (!Require(recovery_call.ok,
+                     "session recovery load failed: " +
+                         FormatError(recovery_call.error_code, recovery_call.error_message))) {
+            return 1;
+        }
+
+        game_backend::proto::LoadPlayerResponse recovery_response;
+        if (!Require(common::net::ParseMessage(recovery_call.packet.body, &recovery_response),
+                     "failed to parse session recovery load response")) {
+            return 1;
+        }
+        if (!Require(recovery_response.success(),
+                     "session recovery load failed: " +
+                         FormatError(static_cast<common::error::ErrorCode>(recovery_response.error_code()),
+                                     recovery_response.error_message()))) {
+            return 1;
+        }
+
+        std::ostringstream recovery_summary;
+        recovery_summary << "session recovery success"
+                         << ", player_id=" << recovery_response.player_state().profile().player_id()
+                         << ", cache=" << (recovery_response.loaded_from_cache() ? "hit" : "miss");
+        common::log::Logger::Instance().Log(common::log::LogLevel::kInfo, recovery_summary.str());
+
+        primary_client.Close();
+        active_client = &recovery_client;
+    }
+
+    const auto load_call = SendMessage(*active_client,
                                        common::net::MessageId::kLoadPlayerRequest,
                                        BuildContext(request_id++, login_response.session_id(), login_response.player_id()),
                                        &load_request);
@@ -297,7 +509,7 @@ int main(int argc, char* argv[]) {
 
     game_backend::proto::LoadPlayerRequest second_load_request;
     second_load_request.set_player_id(login_response.player_id());
-    const auto second_load_call = SendMessage(client,
+    const auto second_load_call = SendMessage(*active_client,
                                               common::net::MessageId::kLoadPlayerRequest,
                                               BuildContext(request_id++, login_response.session_id(), login_response.player_id()),
                                               &second_load_request);
@@ -319,10 +531,13 @@ int main(int argc, char* argv[]) {
     game_backend::proto::EnterDungeonRequest enter_request;
     enter_request.set_player_id(login_response.player_id());
     enter_request.set_dungeon_id(dungeon_id);
-    const auto enter_call = SendMessage(client,
+    const auto enter_call = SendMessage(*active_client,
                                         common::net::MessageId::kEnterDungeonRequest,
                                         BuildContext(request_id++, login_response.session_id(), login_response.player_id()),
                                         &enter_request);
+    if (options.expected_enter_error.has_value()) {
+        return RequireExpectedError(enter_call, *options.expected_enter_error, "enter dungeon request") ? 0 : 1;
+    }
     if (!Require(enter_call.ok, "enter dungeon failed: " + FormatError(enter_call.error_code, enter_call.error_message))) {
         return 1;
     }
@@ -350,7 +565,7 @@ int main(int argc, char* argv[]) {
     settle_request.set_dungeon_id(dungeon_id);
     settle_request.set_star(3);
     settle_request.set_result(true);
-    const auto settle_call = SendMessage(client,
+    const auto settle_call = SendMessage(*active_client,
                                          common::net::MessageId::kSettleDungeonRequest,
                                          BuildContext(request_id++, login_response.session_id(), login_response.player_id()),
                                          &settle_request);
@@ -376,7 +591,7 @@ int main(int argc, char* argv[]) {
 
     game_backend::proto::LoadPlayerRequest refresh_request;
     refresh_request.set_player_id(login_response.player_id());
-    const auto refresh_call = SendMessage(client,
+    const auto refresh_call = SendMessage(*active_client,
                                           common::net::MessageId::kLoadPlayerRequest,
                                           BuildContext(request_id++, login_response.session_id(), login_response.player_id()),
                                           &refresh_request);
@@ -405,7 +620,10 @@ int main(int argc, char* argv[]) {
         wrong_password_request.set_account_name(options.account_name);
         wrong_password_request.set_password("bad-password");
         const auto wrong_password_call =
-            SendMessage(client, common::net::MessageId::kLoginRequest, BuildContext(request_id++), &wrong_password_request);
+            SendMessage(*active_client,
+                        common::net::MessageId::kLoginRequest,
+                        BuildContext(request_id++),
+                        &wrong_password_request);
         if (!Require(wrong_password_call.ok, "wrong password request transport failed")) {
             return 1;
         }
@@ -423,7 +641,7 @@ int main(int argc, char* argv[]) {
 
         game_backend::proto::LoadPlayerRequest invalid_session_request;
         invalid_session_request.set_player_id(login_response.player_id());
-        const auto invalid_session_call = SendMessage(client,
+        const auto invalid_session_call = SendMessage(*active_client,
                                                       common::net::MessageId::kLoadPlayerRequest,
                                                       BuildContext(request_id++, "invalid-session", login_response.player_id()),
                                                       &invalid_session_request);
@@ -439,7 +657,7 @@ int main(int argc, char* argv[]) {
         duplicate_settle_request.set_dungeon_id(dungeon_id);
         duplicate_settle_request.set_star(3);
         duplicate_settle_request.set_result(true);
-        const auto duplicate_settle_call = SendMessage(client,
+        const auto duplicate_settle_call = SendMessage(*active_client,
                                                        common::net::MessageId::kSettleDungeonRequest,
                                                        BuildContext(request_id++, login_response.session_id(), login_response.player_id()),
                                                        &duplicate_settle_request);
@@ -461,7 +679,7 @@ int main(int argc, char* argv[]) {
         game_backend::proto::EnterDungeonRequest invalid_star_enter_request;
         invalid_star_enter_request.set_player_id(login_response.player_id());
         invalid_star_enter_request.set_dungeon_id(dungeon_id);
-        const auto invalid_star_enter_call = SendMessage(client,
+        const auto invalid_star_enter_call = SendMessage(*active_client,
                                                          common::net::MessageId::kEnterDungeonRequest,
                                                          BuildContext(request_id++, login_response.session_id(), login_response.player_id()),
                                                          &invalid_star_enter_request);
@@ -483,7 +701,7 @@ int main(int argc, char* argv[]) {
         invalid_star_settle_request.set_dungeon_id(dungeon_id);
         invalid_star_settle_request.set_star(99);
         invalid_star_settle_request.set_result(true);
-        const auto invalid_star_settle_call = SendMessage(client,
+        const auto invalid_star_settle_call = SendMessage(*active_client,
                                                           common::net::MessageId::kSettleDungeonRequest,
                                                           BuildContext(request_id++, login_response.session_id(), login_response.player_id()),
                                                           &invalid_star_settle_request);
