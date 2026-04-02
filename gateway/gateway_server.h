@@ -7,6 +7,7 @@
 #include "common/net/tcp_client.h"
 #include "common/net/tcp_server.h"
 #include "common/redis/redis_client.h"
+#include "gateway/session_binding_authorizer.h"
 #include "login_server/session/redis_session_repository.h"
 
 #include <functional>
@@ -25,24 +26,18 @@ public:
     int Run(const std::function<bool()>& keep_running);
 
 private:
-    struct ClientBinding {
-        std::string session_id;
-        std::int64_t player_id = 0;
-    };
-
     std::optional<common::net::Packet> HandlePacket(const common::net::IncomingPacket& incoming);
     auto ResolveUpstream(common::net::MessageId message_id) -> common::net::UpstreamClientPool&;
     common::error::ErrorCode MapUpstreamError(const std::string& error_message) const;
-    std::optional<ClientBinding> RestoreBindingFromSession(const common::net::RequestContext& context) const;
 
     common::config::SimpleConfig config_;
     common::net::EpollTcpServer server_;
     common::redis::RedisClient redis_client_;
     std::unique_ptr<login_server::session::RedisSessionRepository> session_repository_;
+    std::unique_ptr<SessionBindingAuthorizer> session_binding_authorizer_;
     std::unique_ptr<common::net::UpstreamClientPool> login_upstream_;
     std::unique_ptr<common::net::UpstreamClientPool> game_upstream_;
     std::unique_ptr<common::net::UpstreamClientPool> dungeon_upstream_;
-    std::unordered_map<std::uint64_t, ClientBinding> client_bindings_;
     std::string instance_id_ = "gateway";
 };
 

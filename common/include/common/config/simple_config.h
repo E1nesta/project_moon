@@ -18,8 +18,9 @@ public:
     [[nodiscard]] const std::unordered_map<std::string, std::string>& Values() const;
 
 private:
+    [[nodiscard]] static std::string ExpandEnvironmentVariables(const std::string& value);
+
     std::unordered_map<std::string, std::string> values_;
 };
 
 }  // namespace common::config
-

@@ -51,7 +51,7 @@ bool LoginNetworkServer::Initialize(std::string* error_message) {
 
     account_repository_ = std::make_unique<auth::MySqlAccountRepository>(mysql_client_);
     session_repository_ = std::make_unique<session::RedisSessionRepository>(
-        redis_client_, config_.GetInt("session.ttl_seconds", 3600));
+        redis_client_, config_.GetInt("ttl.session_seconds", config_.GetInt("session.ttl_seconds", 3600)));
     login_service_ = std::make_unique<LoginService>(*account_repository_, *session_repository_);
 
     if (!server_.Listen(config_.GetString("host", "0.0.0.0"), config_.GetInt("port", 7100), error_message)) {

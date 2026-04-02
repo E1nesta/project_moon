@@ -7,6 +7,7 @@
 #include "dungeon_server/dungeon/dungeon_service.h"
 #include "dungeon_server/dungeon/in_memory_dungeon_config_repository.h"
 #include "dungeon_server/dungeon/mysql_dungeon_repository.h"
+#include "dungeon_server/dungeon/redis_player_lock_repository.h"
 #include "dungeon_server/dungeon/redis_battle_context_repository.h"
 #include "game_server/player/mysql_player_repository.h"
 #include "game_server/player/redis_player_cache_repository.h"
@@ -39,6 +40,7 @@ private:
     std::unique_ptr<dungeon::InMemoryDungeonConfigRepository> dungeon_config_repository_;
     std::unique_ptr<dungeon::MySqlDungeonRepository> dungeon_repository_;
     std::unique_ptr<dungeon::RedisBattleContextRepository> battle_context_repository_;
+    std::unique_ptr<dungeon::RedisPlayerLockRepository> player_lock_repository_;
     std::unique_ptr<dungeon::DungeonService> dungeon_service_;
 };
 

@@ -29,14 +29,15 @@ struct SettleDungeonResult {
 class MySqlDungeonRepository {
 public:
     explicit MySqlDungeonRepository(common::mysql::MySqlClient& mysql_client);
+    virtual ~MySqlDungeonRepository() = default;
 
-    [[nodiscard]] std::optional<common::model::BattleContext> FindBattleById(const std::string& battle_id) const;
-    [[nodiscard]] EnterDungeonResult EnterDungeon(const common::model::PlayerState& player_state,
-                                                  const DungeonConfig& dungeon_config,
-                                                  const std::string& battle_id);
-    [[nodiscard]] SettleDungeonResult SettleDungeon(const common::model::BattleContext& battle_context,
-                                                    const DungeonConfig& dungeon_config,
-                                                    int star);
+    [[nodiscard]] virtual std::optional<common::model::BattleContext> FindBattleById(const std::string& battle_id) const;
+    [[nodiscard]] virtual EnterDungeonResult EnterDungeon(const common::model::PlayerState& player_state,
+                                                          const DungeonConfig& dungeon_config,
+                                                          const std::string& battle_id);
+    [[nodiscard]] virtual SettleDungeonResult SettleDungeon(const common::model::BattleContext& battle_context,
+                                                            const DungeonConfig& dungeon_config,
+                                                            int star);
 
 private:
     common::mysql::MySqlClient& mysql_client_;

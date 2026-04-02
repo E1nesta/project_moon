@@ -28,10 +28,11 @@ enum class DemoScenario {
 };
 
 struct DemoOptions {
-    std::string gateway_config = "configs/gateway.conf";
-    std::string login_config = "configs/login_server.conf";
-    std::string game_config = "configs/game_server.conf";
-    std::string dungeon_config = "configs/dungeon_server.conf";
+    std::string config_profile = "local";
+    std::string gateway_config = "configs/local/gateway.conf";
+    std::string login_config = "configs/local/login_server.conf";
+    std::string game_config = "configs/local/game_server.conf";
+    std::string dungeon_config = "configs/local/dungeon_server.conf";
     std::string account_name = "demo";
     std::string password = "demo123";
     bool reset_demo_state = true;
@@ -120,6 +121,26 @@ DemoOptions ParseOptions(int argc, char* argv[]) {
 
     for (int index = 1; index < argc; ++index) {
         const std::string arg = argv[index];
+        if (arg == "--config-profile" && index + 1 < argc) {
+            options.config_profile = argv[++index];
+            if (options.config_profile == "demo") {
+                options.gateway_config = "configs/demo/gateway_client.conf";
+                options.login_config = "configs/demo/login_server.conf";
+                options.game_config = "configs/demo/game_server.conf";
+                options.dungeon_config = "configs/demo/dungeon_server.conf";
+            } else if (options.config_profile == "delivery") {
+                options.gateway_config = "configs/delivery/gateway_client.conf";
+                options.login_config = "configs/delivery/login_server.conf";
+                options.game_config = "configs/delivery/game_server.conf";
+                options.dungeon_config = "configs/delivery/dungeon_server.conf";
+            } else {
+                options.config_profile = "local";
+                options.gateway_config = "configs/local/gateway.conf";
+                options.login_config = "configs/local/login_server.conf";
+                options.game_config = "configs/local/game_server.conf";
+                options.dungeon_config = "configs/local/dungeon_server.conf";
+            }
+        } else
         if (arg == "--gateway-config" && index + 1 < argc) {
             options.gateway_config = argv[++index];
         } else if (arg == "--login-config" && index + 1 < argc) {

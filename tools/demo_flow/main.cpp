@@ -7,6 +7,7 @@
 #include "dungeon_server/dungeon/in_memory_dungeon_config_repository.h"
 #include "dungeon_server/dungeon/mysql_dungeon_repository.h"
 #include "dungeon_server/dungeon/redis_battle_context_repository.h"
+#include "dungeon_server/dungeon/redis_player_lock_repository.h"
 #include "game_server/player/mysql_player_repository.h"
 #include "game_server/player/player_service.h"
 #include "game_server/player/redis_player_cache_repository.h"
@@ -178,8 +179,10 @@ int main(int argc, char* argv[]) {
     auto dungeon_config_repository = dungeon_server::dungeon::InMemoryDungeonConfigRepository::FromConfig(dungeon_config);
     dungeon_server::dungeon::MySqlDungeonRepository dungeon_repository(mysql_client);
     auto battle_context_repository = dungeon_server::dungeon::RedisBattleContextRepository::FromConfig(redis_client, dungeon_config);
+    dungeon_server::dungeon::RedisPlayerLockRepository player_lock_repository(
+        redis_client, dungeon_config.GetInt("ttl.player_lock_seconds", 10));
     dungeon_server::dungeon::DungeonService dungeon_service(session_repository,
-                                                            redis_client,
+                                                            player_lock_repository,
                                                             player_repository,
                                                             player_cache_repository,
                                                             dungeon_config_repository,

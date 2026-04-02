@@ -1,7 +1,7 @@
 CREATE TABLE IF NOT EXISTS account (
     account_id BIGINT PRIMARY KEY AUTO_INCREMENT,
     account_name VARCHAR(64) NOT NULL UNIQUE,
-    password_hash VARCHAR(128) NOT NULL,
+    password_hash VARCHAR(255) NOT NULL,
     status TINYINT NOT NULL DEFAULT 1,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -67,23 +67,3 @@ CREATE TABLE IF NOT EXISTS reward_log (
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE KEY uk_reward (player_id, battle_id, reward_type)
 );
-
-INSERT INTO account (account_id, account_name, password_hash)
-VALUES (10001, 'demo', 'demo123')
-ON DUPLICATE KEY UPDATE password_hash = VALUES(password_hash);
-
-INSERT INTO player (player_id, account_id, name, level, exp, last_login_at)
-VALUES (20001, 10001, 'hero_demo', 10, 0, NOW())
-ON DUPLICATE KEY UPDATE
-    account_id = VALUES(account_id),
-    name = VALUES(name),
-    level = VALUES(level),
-    exp = VALUES(exp),
-    last_login_at = VALUES(last_login_at);
-
-INSERT INTO player_asset (player_id, stamina, gold, diamond)
-VALUES (20001, 120, 1000, 100)
-ON DUPLICATE KEY UPDATE
-    stamina = VALUES(stamina),
-    gold = VALUES(gold),
-    diamond = VALUES(diamond);

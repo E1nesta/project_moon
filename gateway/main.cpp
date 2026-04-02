@@ -1,10 +1,12 @@
 #include "common/bootstrap/service_app.h"
+#include "common/build/build_info.h"
 #include "common/config/simple_config.h"
 #include "common/log/logger.h"
 #include "gateway/gateway_server.h"
 
 #include <atomic>
 #include <csignal>
+#include <iostream>
 #include <string>
 
 namespace {
@@ -27,6 +29,8 @@ common::bootstrap::ServiceOptions ParseOptions(int argc, char* argv[]) {
             options.config_path = argv[++index];
         } else if (arg == "--check") {
             options.check_only = true;
+        } else if (arg == "--version") {
+            options.show_version = true;
         }
     }
 
@@ -37,6 +41,10 @@ common::bootstrap::ServiceOptions ParseOptions(int argc, char* argv[]) {
 
 int main(int argc, char* argv[]) {
     const auto options = ParseOptions(argc, argv);
+    if (options.show_version) {
+        std::cout << common::build::Version() << '\n';
+        return 0;
+    }
     if (options.check_only) {
         return common::bootstrap::RunService(options);
     }

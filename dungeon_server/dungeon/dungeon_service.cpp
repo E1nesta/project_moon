@@ -5,14 +5,14 @@
 namespace dungeon_server::dungeon {
 
 DungeonService::DungeonService(login_server::session::SessionRepository& session_repository,
-                               common::redis::RedisClient& redis_client,
+                               PlayerLockRepository& player_lock_repository,
                                game_server::player::PlayerRepository& player_repository,
                                game_server::player::PlayerCacheRepository& player_cache_repository,
                                DungeonConfigRepository& dungeon_config_repository,
                                MySqlDungeonRepository& dungeon_repository,
                                BattleContextRepository& battle_context_repository)
     : session_repository_(session_repository),
-      redis_client_(redis_client),
+      player_lock_repository_(player_lock_repository),
       player_repository_(player_repository),
       player_cache_repository_(player_cache_repository),
       dungeon_config_repository_(dungeon_config_repository),
@@ -129,17 +129,12 @@ std::string DungeonService::GenerateBattleId(std::int64_t player_id, int dungeon
     return output.str();
 }
 
-std::string DungeonService::PlayerLockKey(std::int64_t player_id) const {
-    return "player:lock:" + std::to_string(player_id);
-}
-
 bool DungeonService::AcquirePlayerLock(std::int64_t player_id) {
-    bool inserted = false;
-    return redis_client_.SetNxWithExpire(PlayerLockKey(player_id), "1", 10, &inserted) && inserted;
+    return player_lock_repository_.Acquire(player_id);
 }
 
 void DungeonService::ReleasePlayerLock(std::int64_t player_id) {
-    redis_client_.Del(PlayerLockKey(player_id));
+    player_lock_repository_.Release(player_id);
 }
 
 }  // namespace dungeon_server::dungeon

@@ -2,4 +2,4 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-exec "$ROOT_DIR/scripts/run_multi_gateway_demo.sh" "$@"
+exec "$ROOT_DIR/scripts/verify.sh" "$@"

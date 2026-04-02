@@ -52,17 +52,19 @@ bool DungeonNetworkServer::Initialize(std::string* error_message) {
     }
 
     session_repository_ = std::make_unique<login_server::session::RedisSessionRepository>(
-        redis_client_, config_.GetInt("session.ttl_seconds", 3600));
+        redis_client_, config_.GetInt("ttl.session_seconds", config_.GetInt("session.ttl_seconds", 3600)));
     player_repository_ = std::make_unique<game_server::player::MySqlPlayerRepository>(mysql_client_);
     player_cache_repository_ = std::make_unique<game_server::player::RedisPlayerCacheRepository>(
-        redis_client_, config_.GetInt("player.snapshot_ttl_seconds", 300));
+        redis_client_, config_.GetInt("ttl.player_snapshot_seconds", config_.GetInt("player.snapshot_ttl_seconds", 300)));
     dungeon_config_repository_ = std::make_unique<dungeon::InMemoryDungeonConfigRepository>(
         dungeon::InMemoryDungeonConfigRepository::FromConfig(config_));
     dungeon_repository_ = std::make_unique<dungeon::MySqlDungeonRepository>(mysql_client_);
     battle_context_repository_ = std::make_unique<dungeon::RedisBattleContextRepository>(
-        redis_client_, config_.GetInt("battle.context_ttl_seconds", 3600));
+        redis_client_, config_.GetInt("ttl.battle_context_seconds", config_.GetInt("battle.context_ttl_seconds", 3600)));
+    player_lock_repository_ = std::make_unique<dungeon::RedisPlayerLockRepository>(
+        redis_client_, config_.GetInt("ttl.player_lock_seconds", 10));
     dungeon_service_ = std::make_unique<dungeon::DungeonService>(*session_repository_,
-                                                                 redis_client_,
+                                                                 *player_lock_repository_,
                                                                  *player_repository_,
                                                                  *player_cache_repository_,
                                                                  *dungeon_config_repository_,

@@ -52,10 +52,10 @@ bool GameNetworkServer::Initialize(std::string* error_message) {
     }
 
     session_repository_ = std::make_unique<login_server::session::RedisSessionRepository>(
-        redis_client_, config_.GetInt("session.ttl_seconds", 3600));
+        redis_client_, config_.GetInt("ttl.session_seconds", config_.GetInt("session.ttl_seconds", 3600)));
     player_repository_ = std::make_unique<player::MySqlPlayerRepository>(mysql_client_);
     player_cache_repository_ = std::make_unique<player::RedisPlayerCacheRepository>(
-        redis_client_, config_.GetInt("player.snapshot_ttl_seconds", 300));
+        redis_client_, config_.GetInt("ttl.player_snapshot_seconds", config_.GetInt("player.snapshot_ttl_seconds", 300)));
     player_service_ = std::make_unique<player::PlayerService>(
         *session_repository_, *player_repository_, *player_cache_repository_);
 

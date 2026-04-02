@@ -1,5 +1,7 @@
 #include "login_server/login_service.h"
 
+#include "common/security/password_hasher.h"
+
 namespace login_server {
 
 LoginService::LoginService(auth::AccountRepository& account_repository, session::SessionRepository& session_repository)
@@ -15,7 +17,7 @@ LoginResponse LoginService::Login(const LoginRequest& request) {
         return LoginResponse{false, common::error::ErrorCode::kAccountDisabled, "account disabled", {}, 0};
     }
 
-    if (account->password != request.password) {
+    if (!common::security::PasswordHasher::VerifyPassword(request.password, account->password_hash)) {
         return LoginResponse{false, common::error::ErrorCode::kInvalidPassword, "invalid password", {}, 0};
     }
 

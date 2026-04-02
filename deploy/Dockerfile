@@ -11,6 +11,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libprotobuf-dev \
     default-libmysqlclient-dev \
     libhiredis-dev \
+    libssl-dev \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
@@ -28,6 +29,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libprotobuf-dev \
     default-libmysqlclient-dev \
     libhiredis-dev \
+    libssl-dev \
     netcat-openbsd \
     && rm -rf /var/lib/apt/lists/*
 
@@ -35,7 +37,10 @@ COPY --from=builder /src/build/gateway /app/gateway
 COPY --from=builder /src/build/login_server /app/login_server
 COPY --from=builder /src/build/game_server /app/game_server
 COPY --from=builder /src/build/dungeon_server /app/dungeon_server
+COPY --from=builder /src/build/service_check /app/service_check
+COPY --from=builder /src/build/password_tool /app/password_tool
 COPY --from=builder /src/build/demo_flow /app/demo_flow
+COPY --from=builder /src/build/demo_client /app/demo_client
 COPY --from=builder /src/configs /app/configs
 
 CMD ["./gateway", "--config", "configs/gateway_1.conf"]

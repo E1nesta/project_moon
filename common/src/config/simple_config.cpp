@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstdlib>
 #include <fstream>
 #include <sstream>
 
@@ -15,6 +16,22 @@ std::string Trim(std::string value) {
     value.erase(value.begin(), std::find_if(value.begin(), value.end(), not_space));
     value.erase(std::find_if(value.rbegin(), value.rend(), not_space).base(), value.end());
     return value;
+}
+
+std::string ResolveEnvironmentReference(std::string expression) {
+    expression = Trim(std::move(expression));
+    const auto fallback_separator = expression.find(":-");
+    const auto variable_name = Trim(expression.substr(0, fallback_separator));
+    const char* env_value = variable_name.empty() ? nullptr : std::getenv(variable_name.c_str());
+    if (env_value != nullptr && *env_value != '\0') {
+        return env_value;
+    }
+
+    if (fallback_separator != std::string::npos) {
+        return Trim(expression.substr(fallback_separator + 2));
+    }
+
+    return {};
 }
 
 }  // namespace
@@ -40,7 +57,7 @@ bool SimpleConfig::LoadFromFile(const std::string& path) {
         }
 
         std::string key = Trim(line.substr(0, separator));
-        std::string value = Trim(line.substr(separator + 1));
+        std::string value = ExpandEnvironmentVariables(Trim(line.substr(separator + 1)));
         if (!key.empty()) {
             values_[std::move(key)] = std::move(value);
         }
@@ -95,6 +112,24 @@ bool SimpleConfig::GetBool(const std::string& key, bool default_value) const {
 
 const std::unordered_map<std::string, std::string>& SimpleConfig::Values() const {
     return values_;
+}
+
+std::string SimpleConfig::ExpandEnvironmentVariables(const std::string& value) {
+    std::string expanded = value;
+    std::size_t position = 0;
+
+    while ((position = expanded.find("${", position)) != std::string::npos) {
+        const auto end = expanded.find('}', position + 2);
+        if (end == std::string::npos) {
+            break;
+        }
+
+        const auto replacement = ResolveEnvironmentReference(expanded.substr(position + 2, end - position - 2));
+        expanded.replace(position, end - position + 1, replacement);
+        position += replacement.size();
+    }
+
+    return expanded;
 }
 
 }  // namespace common::config

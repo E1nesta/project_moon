@@ -24,7 +24,7 @@ std::optional<common::model::Account> MySqlAccountRepository::FindByName(const s
     common::model::Account account;
     account.account_id = std::stoll(row->at("account_id"));
     account.account_name = row->at("account_name");
-    account.password = row->at("password_hash");
+    account.password_hash = row->at("password_hash");
     account.default_player_id = std::stoll(row->at("default_player_id"));
     account.enabled = row->at("status") == "1";
     return account;

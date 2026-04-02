@@ -1,0 +1,66 @@
+name: ci
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            cmake \
+            pkg-config \
+            protobuf-compiler \
+            libprotobuf-dev \
+            default-libmysqlclient-dev \
+            libhiredis-dev \
+            libssl-dev
+
+      - name: Configure
+        run: cmake -S . -B build
+
+      - name: Build
+        run: cmake --build build -j
+
+      - name: Run unit tests
+        run: cd build && ctest --output-on-failure
+
+  smoke-demo:
+    runs-on: ubuntu-24.04
+    needs: build-and-test
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            cmake \
+            pkg-config \
+            protobuf-compiler \
+            libprotobuf-dev \
+            default-libmysqlclient-dev \
+            libhiredis-dev \
+            libssl-dev
+
+      - name: Build
+        run: |
+          cmake -S . -B build
+          cmake --build build -j
+
+      - name: Run smoke checks
+        env:
+          COMPOSE_BUILD: "1"
+          SKIP_BUILD: "1"
+        run: ./scripts/smoke.sh

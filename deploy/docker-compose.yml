@@ -4,26 +4,30 @@ x-backend-service: &backend-service
     dockerfile: deploy/Dockerfile
   image: mobile_game_backend:local
   restart: unless-stopped
+  env_file:
+    - ./.env.demo
 
 services:
   mysql:
     image: mysql:8.0
     restart: unless-stopped
+    env_file:
+      - ./.env.demo
     environment:
-      MYSQL_ROOT_PASSWORD: rootpass
-      MYSQL_DATABASE: game_backend
-      MYSQL_USER: game
-      MYSQL_PASSWORD: gamepass
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
     ports:
       - "3307:3306"
     volumes:
-      - mysql_data_demo_v4:/var/lib/mysql
+      - mysql_data_demo_v5:/var/lib/mysql
       - ./mysql/init:/docker-entrypoint-initdb.d
     command:
       - --character-set-server=utf8mb4
       - --collation-server=utf8mb4_unicode_ci
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-prootpass"]
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-p${MYSQL_ROOT_PASSWORD}"]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -31,6 +35,8 @@ services:
   redis:
     image: redis:7.2
     restart: unless-stopped
+    env_file:
+      - ./.env.demo
     ports:
       - "6379:6379"
     command: ["redis-server", "--appendonly", "yes"]
@@ -42,49 +48,49 @@ services:
 
   login_server:
     <<: *backend-service
-    command: ["./login_server", "--config", "configs/login_server.docker.conf"]
+    command: ["./login_server", "--config", "configs/demo/login_server.conf"]
     depends_on:
       mysql:
         condition: service_healthy
       redis:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "nc -z 127.0.0.1 7100"]
+      test: ["CMD", "./service_check", "--config", "configs/demo/login_server.conf", "--mode", "ready"]
       interval: 5s
       timeout: 3s
       retries: 20
 
   game_server:
     <<: *backend-service
-    command: ["./game_server", "--config", "configs/game_server.docker.conf"]
+    command: ["./game_server", "--config", "configs/demo/game_server.conf"]
     depends_on:
       mysql:
         condition: service_healthy
       redis:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "nc -z 127.0.0.1 7200"]
+      test: ["CMD", "./service_check", "--config", "configs/demo/game_server.conf", "--mode", "ready"]
       interval: 5s
       timeout: 3s
       retries: 20
 
   dungeon_server:
     <<: *backend-service
-    command: ["./dungeon_server", "--config", "configs/dungeon_server.docker.conf"]
+    command: ["./dungeon_server", "--config", "configs/demo/dungeon_server.conf"]
     depends_on:
       mysql:
         condition: service_healthy
       redis:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "nc -z 127.0.0.1 7300"]
+      test: ["CMD", "./service_check", "--config", "configs/demo/dungeon_server.conf", "--mode", "ready"]
       interval: 5s
       timeout: 3s
       retries: 20
 
   gateway_1:
     <<: *backend-service
-    command: ["./gateway", "--config", "configs/gateway_1.conf"]
+    command: ["./gateway", "--config", "configs/demo/gateway_1.conf"]
     depends_on:
       redis:
         condition: service_healthy
@@ -95,14 +101,14 @@ services:
       dungeon_server:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "nc -z 127.0.0.1 7000"]
+      test: ["CMD", "./service_check", "--config", "configs/demo/gateway_1.conf", "--mode", "ready"]
       interval: 5s
       timeout: 3s
       retries: 20
 
   gateway_2:
     <<: *backend-service
-    command: ["./gateway", "--config", "configs/gateway_2.conf"]
+    command: ["./gateway", "--config", "configs/demo/gateway_2.conf"]
     depends_on:
       redis:
         condition: service_healthy
@@ -113,7 +119,7 @@ services:
       dungeon_server:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "nc -z 127.0.0.1 7000"]
+      test: ["CMD", "./service_check", "--config", "configs/demo/gateway_2.conf", "--mode", "ready"]
       interval: 5s
       timeout: 3s
       retries: 20
@@ -121,6 +127,8 @@ services:
   nginx:
     image: nginx:1.27
     restart: unless-stopped
+    env_file:
+      - ./.env.demo
     ports:
       - "7000:7000"
     volumes:
@@ -130,6 +138,11 @@ services:
         condition: service_healthy
       gateway_2:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "nginx", "-t"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
 
 volumes:
-  mysql_data_demo_v4:
+  mysql_data_demo_v5:
