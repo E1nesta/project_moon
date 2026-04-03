@@ -24,7 +24,11 @@ public:
 
     bool InvalidatePlayerSnapshot(std::int64_t player_id) override {
         invalidated_players_.push_back(player_id);
-        return true;
+        return invalidate_result_;
+    }
+
+    void SetInvalidateResult(bool invalidate_result) {
+        invalidate_result_ = invalidate_result;
     }
 
     [[nodiscard]] bool WasInvalidated(std::int64_t player_id) const {
@@ -32,6 +36,7 @@ public:
     }
 
 private:
+    bool invalidate_result_ = true;
     std::unordered_map<std::int64_t, dungeon_server::dungeon::PlayerSnapshot> players_;
     std::vector<std::int64_t> invalidated_players_;
 };
@@ -190,6 +195,13 @@ int main() {
         return 1;
     }
     if (!Expect(player_snapshot_port.WasInvalidated(20001), "expected player cache invalidation")) {
+        return 1;
+    }
+
+    player_snapshot_port.SetInvalidateResult(false);
+    const auto enter_with_invalidation_failure = dungeon_service.EnterDungeon({20001, 1001});
+    if (!Expect(enter_with_invalidation_failure.success,
+                "expected enter dungeon to remain successful when invalidation fails")) {
         return 1;
     }
 

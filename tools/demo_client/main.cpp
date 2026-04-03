@@ -546,8 +546,8 @@ int main(int argc, char* argv[]) {
     auto player_entry = NewToolEvent("demo_client_load_player_succeeded");
     player_entry.Add("cache", load_response.loaded_from_cache() ? "hit" : "miss");
     player_entry.Add("player_id", load_response.player_state().profile().player_id());
-    player_entry.Add("level", load_response.player_state().profile().level());
-    player_entry.Add("stamina", load_response.player_state().profile().stamina());
+    player_entry.Add("level", static_cast<std::int64_t>(load_response.player_state().profile().level()));
+    player_entry.Add("stamina", static_cast<std::int64_t>(load_response.player_state().profile().stamina()));
     player_entry.Add("gold", load_response.player_state().profile().gold());
     player_entry.Add("diamond", load_response.player_state().profile().diamond());
     EmitToolLog(common::log::LogLevel::kInfo, player_entry);
@@ -595,7 +595,7 @@ int main(int argc, char* argv[]) {
     enter_entry.Add("player_id", login_response.player_id());
     enter_entry.Add("dungeon_id", static_cast<std::int64_t>(dungeon_id));
     enter_entry.Add("battle_id", enter_response.battle_id());
-    enter_entry.Add("remain_stamina", enter_response.remain_stamina());
+    enter_entry.Add("remain_stamina", static_cast<std::int64_t>(enter_response.remain_stamina()));
     EmitToolLog(common::log::LogLevel::kInfo, enter_entry);
 
     game_backend::proto::SettleDungeonRequest settle_request;
@@ -640,7 +640,7 @@ int main(int argc, char* argv[]) {
     }
     auto refresh_entry = NewToolEvent("demo_client_reload_player_succeeded");
     refresh_entry.Add("player_id", login_response.player_id());
-    refresh_entry.Add("stamina", refresh_response.player_state().profile().stamina());
+    refresh_entry.Add("stamina", static_cast<std::int64_t>(refresh_response.player_state().profile().stamina()));
     refresh_entry.Add("gold", refresh_response.player_state().profile().gold());
     refresh_entry.Add("diamond", refresh_response.player_state().profile().diamond());
     refresh_entry.Add("dungeon_progress_count", static_cast<std::int64_t>(refresh_response.player_state().dungeon_progress_size()));

@@ -9,14 +9,11 @@
 #include <utility>
 #include <vector>
 
-#include <spdlog/logger.h>
-#include <spdlog/sinks/ostream_sink.h>
-
 namespace common::log {
 
 struct Logger::Impl {
-    std::shared_ptr<spdlog::logger> stdout_logger;
-    std::shared_ptr<spdlog::logger> stderr_logger;
+    std::ostream* stdout_stream = &std::cout;
+    std::ostream* stderr_stream = &std::cerr;
 };
 
 namespace {
@@ -345,21 +342,6 @@ bool TryParseLogFormat(std::string_view format_name, LogFormat* format) {
     return false;
 }
 
-spdlog::level::level_enum ToSpdlogLevel(LogLevel level) {
-    switch (level) {
-    case LogLevel::kDebug:
-        return spdlog::level::debug;
-    case LogLevel::kInfo:
-        return spdlog::level::info;
-    case LogLevel::kWarn:
-        return spdlog::level::warn;
-    case LogLevel::kError:
-        return spdlog::level::err;
-    }
-
-    return spdlog::level::info;
-}
-
 }  // namespace
 
 Logger& Logger::Instance() {
@@ -368,14 +350,6 @@ Logger& Logger::Instance() {
 }
 
 Logger::Logger() : impl_(std::make_unique<Impl>()) {
-    auto stdout_sink = std::make_shared<spdlog::sinks::ostream_sink_mt>(std::cout, false);
-    auto stderr_sink = std::make_shared<spdlog::sinks::ostream_sink_mt>(std::cerr, false);
-    impl_->stdout_logger = std::make_shared<spdlog::logger>("mobile_game_backend.stdout", stdout_sink);
-    impl_->stderr_logger = std::make_shared<spdlog::logger>("mobile_game_backend.stderr", stderr_sink);
-    impl_->stdout_logger->set_pattern("%v");
-    impl_->stderr_logger->set_pattern("%v");
-    impl_->stdout_logger->set_level(spdlog::level::trace);
-    impl_->stderr_logger->set_level(spdlog::level::trace);
 }
 
 Logger::~Logger() {
@@ -438,8 +412,8 @@ void Logger::LogSync(LogLevel level, std::string_view message) {
 
 void Logger::Flush() {
     if (impl_ != nullptr) {
-        impl_->stdout_logger->flush();
-        impl_->stderr_logger->flush();
+        impl_->stdout_stream->flush();
+        impl_->stderr_stream->flush();
     }
 }
 
@@ -498,10 +472,10 @@ void Logger::WriteRecord(LogRecord record) {
                                           : FormatTextLine(record, LevelToString(record.level));
 
     std::lock_guard lock(output_mutex_);
-    auto& logger = record.level == LogLevel::kWarn || record.level == LogLevel::kError ? impl_->stderr_logger
-                                                                                        : impl_->stdout_logger;
-    logger->log(ToSpdlogLevel(record.level), "{}", line);
-    logger->flush();
+    auto* stream = record.level == LogLevel::kWarn || record.level == LogLevel::kError ? impl_->stderr_stream
+                                                                                        : impl_->stdout_stream;
+    (*stream) << line << '\n';
+    stream->flush();
 }
 
 }  // namespace common::log

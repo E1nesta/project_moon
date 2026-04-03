@@ -1,5 +1,7 @@
 #include "modules/dungeon/application/dungeon_service.h"
 
+#include "runtime/foundation/log/logger.h"
+
 #include <functional>
 #include <sstream>
 
@@ -21,6 +23,13 @@ SettleDungeonResponse BuildSettleError(common::error::ErrorCode error_code, std:
 
 SettleDungeonResponse BuildSettleSuccess(bool first_clear, std::vector<common::model::Reward> rewards) {
     return {true, common::error::ErrorCode::kOk, "", first_clear, std::move(rewards)};
+}
+
+void LogPlayerSnapshotInvalidationFailure(std::int64_t player_id, const char* operation) {
+    common::log::Logger::Instance().Log(
+        common::log::LogLevel::kWarn,
+        std::string("player snapshot invalidation failed after ") + operation + " for player_id=" +
+            std::to_string(player_id));
 }
 
 struct ScopedPlayerLock {
@@ -76,7 +85,9 @@ EnterDungeonResponse DungeonService::EnterDungeon(const EnterDungeonRequest& req
     }
 
     battle_context_repository_.Save(enter_result.battle_context);
-    player_snapshot_port_.InvalidatePlayerSnapshot(request.player_id);
+    if (!player_snapshot_port_.InvalidatePlayerSnapshot(request.player_id)) {
+        LogPlayerSnapshotInvalidationFailure(request.player_id, "enter_dungeon");
+    }
     return BuildEnterSuccess(std::move(battle_id), enter_result.remain_stamina);
 }
 
@@ -116,7 +127,9 @@ SettleDungeonResponse DungeonService::SettleDungeon(const SettleDungeonRequest& 
     }
 
     battle_context_repository_.Delete(request.battle_id);
-    player_snapshot_port_.InvalidatePlayerSnapshot(request.player_id);
+    if (!player_snapshot_port_.InvalidatePlayerSnapshot(request.player_id)) {
+        LogPlayerSnapshotInvalidationFailure(request.player_id, "settle_dungeon");
+    }
     return BuildSettleSuccess(settle_result.first_clear, std::move(settle_result.rewards));
 }
 

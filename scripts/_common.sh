@@ -4,6 +4,55 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DEPLOY_PROFILE="${DEPLOY_PROFILE:-demo}"
 
+configure_preset() {
+  printf '%s\n' "${CMAKE_CONFIGURE_PRESET:-grpc-stack-debug}"
+}
+
+build_preset() {
+  printf '%s\n' "${CMAKE_BUILD_PRESET:-$(configure_preset)}"
+}
+
+build_dir() {
+  printf '%s\n' "$ROOT_DIR/build/$(configure_preset)"
+}
+
+export_grpc_stack_env() {
+  local grpc_stack_root="${GRPC_STACK_ROOT:-$HOME/.local/toolchains/grpc-stack}"
+  export GRPC_STACK_ROOT="$grpc_stack_root"
+  export PATH="$grpc_stack_root/bin:$PATH"
+
+  if [[ -n "${CMAKE_PREFIX_PATH:-}" ]]; then
+    export CMAKE_PREFIX_PATH="$grpc_stack_root:$CMAKE_PREFIX_PATH"
+  else
+    export CMAKE_PREFIX_PATH="$grpc_stack_root"
+  fi
+
+  if [[ -n "${PKG_CONFIG_PATH:-}" ]]; then
+    export PKG_CONFIG_PATH="$grpc_stack_root/lib/pkgconfig:$PKG_CONFIG_PATH"
+  else
+    export PKG_CONFIG_PATH="$grpc_stack_root/lib/pkgconfig"
+  fi
+}
+
+ensure_grpc_stack() {
+  export_grpc_stack_env
+  if [[ -x "$GRPC_STACK_ROOT/bin/protoc" && -x "$GRPC_STACK_ROOT/bin/grpc_cpp_plugin" ]]; then
+    return 0
+  fi
+
+  if pgrep -f "$ROOT_DIR/scripts/setup_grpc_stack.sh" >/dev/null 2>&1; then
+    echo "waiting for existing gRPC stack build to finish..."
+    while pgrep -f "$ROOT_DIR/scripts/setup_grpc_stack.sh" >/dev/null 2>&1; do
+      sleep 5
+    done
+    if [[ -x "$GRPC_STACK_ROOT/bin/protoc" && -x "$GRPC_STACK_ROOT/bin/grpc_cpp_plugin" ]]; then
+      return 0
+    fi
+  fi
+
+  "$ROOT_DIR/scripts/setup_grpc_stack.sh"
+}
+
 compose_file() {
   if [[ "$DEPLOY_PROFILE" == "delivery" ]]; then
     printf '%s\n' "$ROOT_DIR/deploy/docker-compose.delivery.yml"
@@ -33,8 +82,12 @@ build_local_binaries() {
     return 0
   fi
 
-  cmake -S "$ROOT_DIR" -B "$ROOT_DIR/build"
-  cmake --build "$ROOT_DIR/build" -j
+  ensure_grpc_stack
+  (
+    cd "$ROOT_DIR"
+    cmake --preset "$(configure_preset)"
+    cmake --build --preset "$(build_preset)" --parallel
+  )
 }
 
 up_stack() {
@@ -54,6 +107,6 @@ run_demo_client() {
     MYSQL_PORT=3307 \
     REDIS_HOST=127.0.0.1 \
     REDIS_PORT=6379 \
-    "$ROOT_DIR/build/demo_client" --config-profile demo "$@"
+    "$(build_dir)/demo_client" --config-profile demo "$@"
   fi
 }

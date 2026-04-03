@@ -2,9 +2,8 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+source "$ROOT_DIR/scripts/_common.sh"
 
-cmake -S "$ROOT_DIR" -B "$ROOT_DIR/build"
-cmake --build "$ROOT_DIR/build" -j
+build_local_binaries
 
-cd "$ROOT_DIR/build"
-ctest --output-on-failure "$@"
+ctest --test-dir "$(build_dir)" --output-on-failure "$@"

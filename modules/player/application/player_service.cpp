@@ -12,6 +12,28 @@ LoadPlayerResponse BuildLoadPlayerSuccess(const common::model::PlayerState& play
     return {true, common::error::ErrorCode::kOk, "", player_state, loaded_from_cache};
 }
 
+PlayerSnapshotResponse BuildSnapshotSuccess(const common::model::PlayerState& player_state) {
+    return {true,
+            common::error::ErrorCode::kOk,
+            "",
+            true,
+            player_state.profile.player_id,
+            player_state.profile.level,
+            player_state.profile.stamina};
+}
+
+PlayerSnapshotResponse BuildSnapshotMissing() {
+    return {true, common::error::ErrorCode::kOk, "", false, 0, 0, 0};
+}
+
+InvalidatePlayerCacheResponse BuildInvalidateSuccess() {
+    return {true, common::error::ErrorCode::kOk, ""};
+}
+
+InvalidatePlayerCacheResponse BuildInvalidateFailure(common::error::ErrorCode error_code, std::string error_message) {
+    return {false, error_code, std::move(error_message)};
+}
+
 }  // namespace
 
 PlayerService::PlayerService(PlayerRepository& player_repository,
@@ -31,6 +53,28 @@ LoadPlayerResponse PlayerService::LoadPlayer(std::int64_t player_id) {
 
     player_cache_repository_.Save(*player_state);
     return BuildLoadSuccess(*player_state, false);
+}
+
+PlayerSnapshotResponse PlayerService::GetPlayerSnapshot(std::int64_t player_id) {
+    if (const auto cached_state = LoadCachedPlayer(player_id); cached_state.has_value()) {
+        return BuildSnapshotSuccess(*cached_state);
+    }
+
+    const auto player_state = LoadPlayerFromStorage(player_id);
+    if (!player_state.has_value()) {
+        return BuildSnapshotMissing();
+    }
+
+    player_cache_repository_.Save(*player_state);
+    return BuildSnapshotSuccess(*player_state);
+}
+
+InvalidatePlayerCacheResponse PlayerService::InvalidatePlayerCache(std::int64_t player_id) {
+    if (player_cache_repository_.Invalidate(player_id)) {
+        return BuildInvalidateSuccess();
+    }
+
+    return BuildInvalidateFailure(common::error::ErrorCode::kStorageError, "failed to invalidate player cache");
 }
 
 std::optional<common::model::PlayerState> PlayerService::LoadCachedPlayer(std::int64_t player_id) const {

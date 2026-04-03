@@ -1,0 +1,27 @@
+syntax = "proto3";
+
+package game_backend.internal.player;
+
+service PlayerInternal {
+  rpc GetPlayerSnapshot(GetPlayerSnapshotRequest) returns (GetPlayerSnapshotResponse);
+  rpc InvalidatePlayerCache(InvalidatePlayerCacheRequest) returns (InvalidatePlayerCacheResponse);
+}
+
+message GetPlayerSnapshotRequest {
+  int64 player_id = 1;
+}
+
+message GetPlayerSnapshotResponse {
+  bool found = 1;
+  int64 player_id = 2;
+  int32 level = 3;
+  int32 stamina = 4;
+}
+
+message InvalidatePlayerCacheRequest {
+  int64 player_id = 1;
+}
+
+message InvalidatePlayerCacheResponse {
+  bool success = 1;
+}

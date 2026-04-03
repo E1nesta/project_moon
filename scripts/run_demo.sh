@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-docker compose -f deploy/docker-compose.yml up -d
+source "$(cd "$(dirname "$0")" && pwd)/_common.sh"
 
-cmake -S . -B build
-cmake --build build -j
+compose_cmd up -d --wait
 
-./build/demo_flow \
+build_local_binaries
+BUILD_DIR="$(build_dir)"
+
+"$BUILD_DIR/demo_flow" \
   --login-config configs/login_server.conf \
   --player-config configs/player_server.conf \
   --dungeon-config configs/dungeon_server.conf

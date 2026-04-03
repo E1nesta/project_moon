@@ -3,13 +3,12 @@
 #include "runtime/storage/mysql/mysql_client_pool.h"
 #include "runtime/storage/redis/redis_client_pool.h"
 #include "modules/dungeon/application/dungeon_service.h"
+#include "modules/dungeon/infrastructure/grpc_player_snapshot_port.h"
 #include "modules/dungeon/infrastructure/in_memory_dungeon_config_repository.h"
 #include "modules/dungeon/infrastructure/mysql_dungeon_repository.h"
 #include "modules/dungeon/infrastructure/redis_battle_context_repository.h"
 #include "modules/dungeon/infrastructure/redis_player_lock_repository.h"
 #include "runtime/transport/service_app.h"
-#include "modules/player/infrastructure/mysql_player_repository.h"
-#include "modules/player/infrastructure/redis_player_cache_repository.h"
 
 #include <memory>
 
@@ -35,8 +34,6 @@ private:
 
     std::unique_ptr<common::mysql::MySqlClientPool> mysql_pool_;
     std::unique_ptr<common::redis::RedisClientPool> redis_pool_;
-    std::unique_ptr<game_server::player::MySqlPlayerRepository> player_repository_;
-    std::unique_ptr<game_server::player::RedisPlayerCacheRepository> player_cache_repository_;
     std::unique_ptr<dungeon_server::dungeon::PlayerSnapshotPort> player_snapshot_port_;
     std::unique_ptr<dungeon_server::dungeon::InMemoryDungeonConfigRepository> dungeon_config_repository_;
     std::unique_ptr<dungeon_server::dungeon::MySqlDungeonRepository> dungeon_repository_;

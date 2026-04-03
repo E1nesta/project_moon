@@ -8,11 +8,18 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+set(GRPC_STACK_ROOT_DEFAULT "$ENV{HOME}/.local/toolchains/grpc-stack")
+if(DEFINED ENV{GRPC_STACK_ROOT} AND NOT "$ENV{GRPC_STACK_ROOT}" STREQUAL "")
+    set(GRPC_STACK_ROOT_DEFAULT "$ENV{GRPC_STACK_ROOT}")
+endif()
+set(GRPC_STACK_ROOT "${GRPC_STACK_ROOT_DEFAULT}" CACHE PATH "Root directory of the local gRPC/Protobuf toolchain")
+list(PREPEND CMAKE_PREFIX_PATH "${GRPC_STACK_ROOT}")
+
 find_package(Threads REQUIRED)
 find_package(Boost REQUIRED COMPONENTS system)
-find_package(spdlog REQUIRED)
 find_package(PkgConfig REQUIRED)
-find_package(Protobuf REQUIRED)
+find_package(Protobuf CONFIG REQUIRED PATHS "${GRPC_STACK_ROOT}" NO_DEFAULT_PATH)
+find_package(gRPC CONFIG REQUIRED PATHS "${GRPC_STACK_ROOT}" NO_DEFAULT_PATH)
 pkg_check_modules(MYSQLCLIENT REQUIRED mysqlclient)
 pkg_check_modules(HIREDIS REQUIRED hiredis)
 pkg_check_modules(OPENSSL REQUIRED openssl)
@@ -21,7 +28,70 @@ if(BUILD_TESTING)
     find_package(Python3 REQUIRED COMPONENTS Interpreter)
 endif()
 
-protobuf_generate_cpp(PROTO_SRCS PROTO_HDRS proto/game_backend.proto)
+find_program(PROTOC_EXECUTABLE protoc PATHS "${GRPC_STACK_ROOT}/bin" NO_DEFAULT_PATH REQUIRED)
+find_program(GRPC_CPP_PLUGIN_EXECUTABLE grpc_cpp_plugin PATHS "${GRPC_STACK_ROOT}/bin" NO_DEFAULT_PATH REQUIRED)
+
+function(generate_proto_sources proto_relative_path out_srcs out_hdrs)
+    get_filename_component(proto_name "${proto_relative_path}" NAME_WE)
+    get_filename_component(proto_dir "${proto_relative_path}" DIRECTORY)
+    if(proto_dir)
+        set(output_dir "${CMAKE_CURRENT_BINARY_DIR}/${proto_dir}")
+    else()
+        set(output_dir "${CMAKE_CURRENT_BINARY_DIR}")
+    endif()
+    set(generated_src "${output_dir}/${proto_name}.pb.cc")
+    set(generated_hdr "${output_dir}/${proto_name}.pb.h")
+    add_custom_command(
+        OUTPUT "${generated_src}" "${generated_hdr}"
+        COMMAND "${CMAKE_COMMAND}" -E make_directory "${output_dir}"
+        COMMAND "${PROTOC_EXECUTABLE}"
+                --proto_path=${CMAKE_CURRENT_SOURCE_DIR}/proto
+                --cpp_out=${CMAKE_CURRENT_BINARY_DIR}
+                "${CMAKE_CURRENT_SOURCE_DIR}/proto/${proto_relative_path}"
+        DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/proto/${proto_relative_path}"
+        VERBATIM
+    )
+    set(${out_srcs} "${generated_src}" PARENT_SCOPE)
+    set(${out_hdrs} "${generated_hdr}" PARENT_SCOPE)
+endfunction()
+
+function(generate_grpc_sources proto_relative_path out_srcs out_hdrs)
+    set(additional_deps ${ARGN})
+    get_filename_component(proto_name "${proto_relative_path}" NAME_WE)
+    get_filename_component(proto_dir "${proto_relative_path}" DIRECTORY)
+    if(proto_dir)
+        set(output_dir "${CMAKE_CURRENT_BINARY_DIR}/${proto_dir}")
+    else()
+        set(output_dir "${CMAKE_CURRENT_BINARY_DIR}")
+    endif()
+    set(generated_src "${output_dir}/${proto_name}.grpc.pb.cc")
+    set(generated_hdr "${output_dir}/${proto_name}.grpc.pb.h")
+    add_custom_command(
+        OUTPUT "${generated_src}" "${generated_hdr}"
+        COMMAND "${CMAKE_COMMAND}" -E make_directory "${output_dir}"
+        COMMAND "${PROTOC_EXECUTABLE}"
+                --proto_path=${CMAKE_CURRENT_SOURCE_DIR}/proto
+                --plugin=protoc-gen-grpc=${GRPC_CPP_PLUGIN_EXECUTABLE}
+                --grpc_out=${CMAKE_CURRENT_BINARY_DIR}
+                "${CMAKE_CURRENT_SOURCE_DIR}/proto/${proto_relative_path}"
+        DEPENDS
+            "${CMAKE_CURRENT_SOURCE_DIR}/proto/${proto_relative_path}"
+            ${additional_deps}
+        VERBATIM
+    )
+    set(${out_srcs} "${generated_src}" PARENT_SCOPE)
+    set(${out_hdrs} "${generated_hdr}" PARENT_SCOPE)
+endfunction()
+
+generate_proto_sources("game_backend.proto" PROTO_SRCS PROTO_HDRS)
+generate_proto_sources("internal/player_internal.proto" INTERNAL_PROTO_SRCS INTERNAL_PROTO_HDRS)
+generate_grpc_sources(
+    "internal/player_internal.proto"
+    INTERNAL_GRPC_SRCS
+    INTERNAL_GRPC_HDRS
+    "${INTERNAL_PROTO_SRCS}"
+    "${INTERNAL_PROTO_HDRS}"
+)
 
 add_library(protocol STATIC
     ${PROTO_SRCS}
@@ -33,6 +103,20 @@ target_link_libraries(protocol
 )
 
 target_include_directories(protocol
+    PUBLIC
+        ${CMAKE_CURRENT_BINARY_DIR}
+)
+
+add_library(internal_protocol STATIC
+    ${INTERNAL_PROTO_SRCS}
+    ${INTERNAL_GRPC_SRCS}
+)
+target_link_libraries(internal_protocol
+    PUBLIC
+        protobuf::libprotobuf
+        gRPC::grpc++
+)
+target_include_directories(internal_protocol
     PUBLIC
         ${CMAKE_CURRENT_BINARY_DIR}
 )
@@ -71,7 +155,6 @@ set_backend_target_defaults(runtime_foundation)
 target_link_libraries(runtime_foundation
     PUBLIC
         ${OPENSSL_LIBRARIES}
-        spdlog::spdlog
 )
 target_compile_definitions(runtime_foundation PUBLIC MOBILE_GAME_BACKEND_VERSION="${PROJECT_VERSION}")
 
@@ -161,6 +244,19 @@ target_link_libraries(runtime_transport
         ${OPENSSL_LIBRARIES}
 )
 
+add_library(runtime_grpc STATIC
+    runtime/grpc/channel_factory.cpp
+    runtime/grpc/server_runner.cpp
+)
+set_backend_target_defaults(runtime_grpc)
+target_link_libraries(runtime_grpc
+    PUBLIC
+        runtime_foundation
+        runtime_storage
+        protobuf::libprotobuf
+        gRPC::grpc++
+)
+
 add_library(runtime_core INTERFACE)
 target_link_libraries(runtime_core
     INTERFACE
@@ -171,6 +267,7 @@ target_link_libraries(runtime_core
         runtime_protocol
         runtime_execution
         runtime_transport
+        runtime_grpc
 )
 target_compile_definitions(runtime_core INTERFACE MOBILE_GAME_BACKEND_VERSION="${PROJECT_VERSION}")
 
@@ -218,6 +315,18 @@ target_link_libraries(player_infrastructure
         runtime_storage
 )
 
+add_library(player_grpc_interfaces STATIC
+    modules/player/interfaces/grpc/player_internal_service_impl.cpp
+)
+set_backend_target_defaults(player_grpc_interfaces)
+target_link_libraries(player_grpc_interfaces
+    PUBLIC
+        player_application
+        player_infrastructure
+        internal_protocol
+        runtime_grpc
+)
+
 add_library(dungeon_application STATIC
     modules/dungeon/application/dungeon_service.cpp
 )
@@ -229,6 +338,7 @@ target_link_libraries(dungeon_application
 
 add_library(dungeon_infrastructure STATIC
     modules/dungeon/infrastructure/in_memory_dungeon_config_repository.cpp
+    modules/dungeon/infrastructure/grpc_player_snapshot_port.cpp
     modules/dungeon/infrastructure/mysql_dungeon_repository.cpp
     modules/dungeon/infrastructure/redis_player_lock_repository.cpp
     modules/dungeon/infrastructure/redis_battle_context_repository.cpp
@@ -239,6 +349,8 @@ target_link_libraries(dungeon_infrastructure
         dungeon_application
         runtime_foundation
         runtime_storage
+        internal_protocol
+        runtime_grpc
 )
 
 add_library(gateway_support STATIC
@@ -274,11 +386,17 @@ add_backend_executable(player_server
 )
 target_link_libraries(player_server PRIVATE player_application player_infrastructure runtime_core)
 
+add_backend_executable(player_internal_grpc_server
+    apps/player_internal_grpc_server/main.cpp
+    apps/player_internal_grpc_server/player_internal_grpc_server_app.cpp
+)
+target_link_libraries(player_internal_grpc_server PRIVATE player_application player_infrastructure player_grpc_interfaces runtime_core)
+
 add_backend_executable(dungeon_server
     apps/dungeon/main.cpp
     apps/dungeon/dungeon_server_app.cpp
 )
-target_link_libraries(dungeon_server PRIVATE dungeon_application dungeon_infrastructure player_infrastructure runtime_core)
+target_link_libraries(dungeon_server PRIVATE dungeon_application dungeon_infrastructure runtime_core)
 
 add_executable(service_check
     tools/service_check/main.cpp
@@ -324,6 +442,18 @@ add_executable(player_service_test
 )
 set_backend_target_defaults(player_service_test)
 target_link_libraries(player_service_test PRIVATE player_application player_infrastructure runtime_core)
+
+add_executable(player_internal_service_test
+    tests/player_internal_service_test.cpp
+)
+set_backend_target_defaults(player_internal_service_test)
+target_link_libraries(player_internal_service_test PRIVATE player_application player_infrastructure player_grpc_interfaces runtime_core)
+
+add_executable(grpc_player_snapshot_port_test
+    tests/grpc_player_snapshot_port_test.cpp
+)
+set_backend_target_defaults(grpc_player_snapshot_port_test)
+target_link_libraries(grpc_player_snapshot_port_test PRIVATE dungeon_infrastructure player_application player_infrastructure player_grpc_interfaces runtime_core)
 
 add_executable(dungeon_service_test
     tests/dungeon_service_test.cpp
@@ -406,6 +536,8 @@ if(BUILD_TESTING)
 endif()
 add_test(NAME login_service_test COMMAND login_service_test)
 add_test(NAME player_service_test COMMAND player_service_test)
+add_test(NAME player_internal_service_test COMMAND player_internal_service_test)
+add_test(NAME grpc_player_snapshot_port_test COMMAND grpc_player_snapshot_port_test)
 add_test(NAME dungeon_service_test COMMAND dungeon_service_test)
 add_test(NAME session_binding_service_test COMMAND session_binding_service_test)
 add_test(NAME packet_codec_test COMMAND packet_codec_test)

@@ -74,6 +74,20 @@ services:
       timeout: 3s
       retries: 20
 
+  player_internal_grpc_server:
+    <<: *backend-service
+    command: ["./player_internal_grpc_server", "--config", "configs/demo/player_internal_grpc_server.conf"]
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z 127.0.0.1 ${PLAYER_INTERNAL_GRPC_PORT:-7400}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
   dungeon_server:
     <<: *backend-service
     command: ["./dungeon_server", "--config", "configs/demo/dungeon_server.conf"]
@@ -81,6 +95,8 @@ services:
       mysql:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      player_internal_grpc_server:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "./service_check", "--config", "configs/demo/dungeon_server.conf", "--mode", "ready"]

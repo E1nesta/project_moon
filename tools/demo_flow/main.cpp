@@ -25,6 +25,32 @@
 
 namespace {
 
+class LocalPlayerSnapshotPort final : public dungeon_server::dungeon::PlayerSnapshotPort {
+public:
+    explicit LocalPlayerSnapshotPort(game_server::player::PlayerService& player_service)
+        : player_service_(player_service) {}
+
+    std::optional<dungeon_server::dungeon::PlayerSnapshot> LoadPlayerSnapshot(std::int64_t player_id) const override {
+        const auto response = player_service_.GetPlayerSnapshot(player_id);
+        if (!response.success || !response.found) {
+            return std::nullopt;
+        }
+
+        dungeon_server::dungeon::PlayerSnapshot snapshot;
+        snapshot.player_id = response.player_id;
+        snapshot.level = response.level;
+        snapshot.stamina = response.stamina;
+        return snapshot;
+    }
+
+    bool InvalidatePlayerSnapshot(std::int64_t player_id) override {
+        return player_service_.InvalidatePlayerCache(player_id).success;
+    }
+
+private:
+    game_server::player::PlayerService& player_service_;
+};
+
 struct DemoOptions {
     std::string login_config = "configs/login_server.conf";
     std::string player_config = "configs/player_server.conf";
@@ -225,17 +251,16 @@ int main(int argc, char* argv[]) {
 
     game_server::player::MySqlPlayerRepository player_repository(mysql_pool);
     auto player_cache_repository = game_server::player::RedisPlayerCacheRepository::FromConfig(redis_pool, player_config);
-    game_server::player::PlayerService player_service(session_repository, player_repository, player_cache_repository);
+    game_server::player::PlayerService player_service(player_repository, player_cache_repository);
+    LocalPlayerSnapshotPort player_snapshot_port(player_service);
 
     auto dungeon_config_repository = dungeon_server::dungeon::InMemoryDungeonConfigRepository::FromConfig(dungeon_config);
     dungeon_server::dungeon::MySqlDungeonRepository dungeon_repository(mysql_pool);
     auto battle_context_repository = dungeon_server::dungeon::RedisBattleContextRepository::FromConfig(redis_pool, dungeon_config);
     dungeon_server::dungeon::RedisPlayerLockRepository player_lock_repository(
         redis_pool, dungeon_config.GetInt("ttl.player_lock_seconds", 10));
-    dungeon_server::dungeon::DungeonService dungeon_service(session_repository,
-                                                            player_lock_repository,
-                                                            player_repository,
-                                                            player_cache_repository,
+    dungeon_server::dungeon::DungeonService dungeon_service(player_lock_repository,
+                                                            player_snapshot_port,
                                                             dungeon_config_repository,
                                                             dungeon_repository,
                                                             battle_context_repository);
@@ -252,7 +277,7 @@ int main(int argc, char* argv[]) {
     login_entry.Add("player_id", login_response.default_player_id);
     EmitToolLog(common::log::LogLevel::kInfo, login_entry);
 
-    auto player_response = player_service.LoadPlayer(login_response.session.session_id, login_response.default_player_id);
+    auto player_response = player_service.LoadPlayer(login_response.default_player_id);
     if (!Require(player_response.success,
                  "load player failed: " + FormatError(player_response.error_code, player_response.error_message))) {
         return 1;
@@ -261,13 +286,13 @@ int main(int argc, char* argv[]) {
     auto player_entry = NewToolEvent("demo_flow_load_player_succeeded");
     player_entry.Add("cache", player_response.loaded_from_cache ? "hit" : "miss");
     player_entry.Add("player_id", player_response.player_state.profile.player_id);
-    player_entry.Add("level", player_response.player_state.profile.level);
-    player_entry.Add("stamina", player_response.player_state.profile.stamina);
+    player_entry.Add("level", static_cast<std::int64_t>(player_response.player_state.profile.level));
+    player_entry.Add("stamina", static_cast<std::int64_t>(player_response.player_state.profile.stamina));
     player_entry.Add("gold", player_response.player_state.profile.gold);
     player_entry.Add("diamond", player_response.player_state.profile.diamond);
     EmitToolLog(common::log::LogLevel::kInfo, player_entry);
 
-    player_response = player_service.LoadPlayer(login_response.session.session_id, login_response.default_player_id);
+    player_response = player_service.LoadPlayer(login_response.default_player_id);
     if (!Require(player_response.success && player_response.loaded_from_cache,
                  "second load should hit redis snapshot: " +
                      FormatError(player_response.error_code, player_response.error_message))) {
@@ -276,7 +301,7 @@ int main(int argc, char* argv[]) {
 
     const auto dungeon_id = dungeon_config.GetInt("demo.dungeon_id", 1001);
     const auto enter_response = dungeon_service.EnterDungeon(
-        {login_response.session.session_id, login_response.default_player_id, dungeon_id});
+        {login_response.default_player_id, dungeon_id});
     if (!Require(enter_response.success,
                  "enter dungeon failed: " + FormatError(enter_response.error_code, enter_response.error_message))) {
         return 1;
@@ -286,12 +311,11 @@ int main(int argc, char* argv[]) {
     enter_entry.Add("player_id", login_response.default_player_id);
     enter_entry.Add("dungeon_id", static_cast<std::int64_t>(dungeon_id));
     enter_entry.Add("battle_id", enter_response.battle_id);
-    enter_entry.Add("remain_stamina", enter_response.remain_stamina);
+    enter_entry.Add("remain_stamina", static_cast<std::int64_t>(enter_response.remain_stamina));
     EmitToolLog(common::log::LogLevel::kInfo, enter_entry);
 
     const auto settle_response =
-        dungeon_service.SettleDungeon({login_response.session.session_id,
-                                       login_response.default_player_id,
+        dungeon_service.SettleDungeon({login_response.default_player_id,
                                        enter_response.battle_id,
                                        dungeon_id,
                                        3,
@@ -309,7 +333,7 @@ int main(int argc, char* argv[]) {
     EmitToolLog(common::log::LogLevel::kInfo, settle_entry);
     LogRewards(settle_response.rewards);
 
-    const auto refreshed_player = player_service.LoadPlayer(login_response.session.session_id, login_response.default_player_id);
+    const auto refreshed_player = player_service.LoadPlayer(login_response.default_player_id);
     if (!Require(refreshed_player.success,
                  "reload player after settlement failed: " +
                      FormatError(refreshed_player.error_code, refreshed_player.error_message))) {
@@ -318,7 +342,7 @@ int main(int argc, char* argv[]) {
 
     auto refreshed_entry = NewToolEvent("demo_flow_reload_player_succeeded");
     refreshed_entry.Add("player_id", login_response.default_player_id);
-    refreshed_entry.Add("stamina", refreshed_player.player_state.profile.stamina);
+    refreshed_entry.Add("stamina", static_cast<std::int64_t>(refreshed_player.player_state.profile.stamina));
     refreshed_entry.Add("gold", refreshed_player.player_state.profile.gold);
     refreshed_entry.Add("diamond", refreshed_player.player_state.profile.diamond);
     refreshed_entry.Add("dungeon_progress_count",
@@ -332,16 +356,8 @@ int main(int argc, char* argv[]) {
             return 1;
         }
 
-        const auto invalid_session = player_service.LoadPlayer("invalid-session", login_response.default_player_id);
-        if (!Require(!invalid_session.success &&
-                         invalid_session.error_code == common::error::ErrorCode::kSessionInvalid,
-                     "invalid session case should be rejected")) {
-            return 1;
-        }
-
         const auto duplicate_settle =
-            dungeon_service.SettleDungeon({login_response.session.session_id,
-                                           login_response.default_player_id,
+            dungeon_service.SettleDungeon({login_response.default_player_id,
                                            enter_response.battle_id,
                                            dungeon_id,
                                            3,
@@ -353,7 +369,7 @@ int main(int argc, char* argv[]) {
         }
 
         const auto invalid_star_enter = dungeon_service.EnterDungeon(
-            {login_response.session.session_id, login_response.default_player_id, dungeon_id});
+            {login_response.default_player_id, dungeon_id});
         if (!Require(invalid_star_enter.success,
                      "second enter for invalid-star case should succeed: " +
                          FormatError(invalid_star_enter.error_code, invalid_star_enter.error_message))) {
@@ -361,8 +377,7 @@ int main(int argc, char* argv[]) {
         }
 
         const auto invalid_star_settle =
-            dungeon_service.SettleDungeon({login_response.session.session_id,
-                                           login_response.default_player_id,
+            dungeon_service.SettleDungeon({login_response.default_player_id,
                                            invalid_star_enter.battle_id,
                                            dungeon_id,
                                            99,

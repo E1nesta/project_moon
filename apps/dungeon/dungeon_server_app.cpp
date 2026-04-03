@@ -1,5 +1,6 @@
 #include "apps/dungeon/dungeon_server_app.h"
 
+#include "runtime/grpc/channel_factory.h"
 #include "runtime/protocol/proto_mapper.h"
 #include "runtime/protocol/adapter_utils.h"
 
@@ -8,7 +9,6 @@
 namespace services::dungeon {
 
 namespace {
-
 void FillProtoReward(const common::model::Reward& reward, game_backend::proto::Reward* output) {
     if (output == nullptr) {
         return;
@@ -17,42 +17,6 @@ void FillProtoReward(const common::model::Reward& reward, game_backend::proto::R
     output->set_reward_type(reward.reward_type);
     output->set_amount(reward.amount);
 }
-
-class PlayerSnapshotAdapter final : public dungeon_server::dungeon::PlayerSnapshotPort {
-public:
-    PlayerSnapshotAdapter(game_server::player::PlayerRepository& player_repository,
-                          game_server::player::PlayerCacheRepository& player_cache_repository)
-        : player_repository_(player_repository),
-          player_cache_repository_(player_cache_repository) {}
-
-    [[nodiscard]] std::optional<dungeon_server::dungeon::PlayerSnapshot> LoadPlayerSnapshot(
-        std::int64_t player_id) const override {
-        if (const auto cached = player_cache_repository_.FindByPlayerId(player_id); cached.has_value()) {
-            return BuildSnapshot(*cached);
-        }
-        if (const auto loaded = player_repository_.LoadPlayerState(player_id); loaded.has_value()) {
-            return BuildSnapshot(*loaded);
-        }
-        return std::nullopt;
-    }
-
-    bool InvalidatePlayerSnapshot(std::int64_t player_id) override {
-        return player_cache_repository_.Invalidate(player_id);
-    }
-
-private:
-    [[nodiscard]] static dungeon_server::dungeon::PlayerSnapshot BuildSnapshot(
-        const common::model::PlayerState& player_state) {
-        dungeon_server::dungeon::PlayerSnapshot snapshot;
-        snapshot.player_id = player_state.profile.player_id;
-        snapshot.level = player_state.profile.level;
-        snapshot.stamina = player_state.profile.stamina;
-        return snapshot;
-    }
-
-    game_server::player::PlayerRepository& player_repository_;
-    game_server::player::PlayerCacheRepository& player_cache_repository_;
-};
 
 common::net::Packet BuildEnterDungeonResponsePacket(
     const framework::protocol::HandlerContext& context,
@@ -97,11 +61,8 @@ bool DungeonServerApp::BuildDependencies(std::string* error_message) {
         return false;
     }
 
-    player_repository_ = std::make_unique<game_server::player::MySqlPlayerRepository>(*mysql_pool_);
-    player_cache_repository_ = std::make_unique<game_server::player::RedisPlayerCacheRepository>(
-        *redis_pool_, Config().GetInt("storage.player.snapshot_ttl_seconds", 300));
-    player_snapshot_port_ = std::make_unique<PlayerSnapshotAdapter>(
-        *player_repository_, *player_cache_repository_);
+    player_snapshot_port_ = std::make_unique<dungeon_server::dungeon::GrpcPlayerSnapshotPort>(
+        framework::grpc::CreateInsecureChannel(Config(), "grpc.client.player_internal."));
     dungeon_config_repository_ =
         std::make_unique<dungeon_server::dungeon::InMemoryDungeonConfigRepository>(
             dungeon_server::dungeon::InMemoryDungeonConfigRepository::FromConfig(Config()));

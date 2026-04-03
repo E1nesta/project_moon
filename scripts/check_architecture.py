@@ -10,12 +10,13 @@ INCLUDE_RE = re.compile(r'^\s*#include\s+"([^"]+)"', re.MULTILINE)
 
 EXPECTED_MODULE_SHAPES = {
     "login": {"application", "domain", "infrastructure"},
-    "player": {"application", "domain", "infrastructure", "ports"},
+    "player": {"application", "domain", "infrastructure", "interfaces", "ports"},
     "dungeon": {"application", "domain", "infrastructure", "ports"},
 }
 
 EXPECTED_RUNTIME_DIRS = {
     "foundation",
+    "grpc",
     "observability",
     "protocol",
     "execution",
@@ -128,16 +129,12 @@ def main() -> int:
                         fail(errors, f"{relative}: gateway app 不应直接依赖业务模块 -> {include}")
                     continue
 
-                owned_module = app_name
+                owned_module = "player" if app_name == "player_internal_grpc_server" else app_name
                 allowed_prefixes = {
                     f"modules/{owned_module}/",
                     "runtime/",
                     f"apps/{app_name}/",
                 }
-
-                if app_name == "dungeon":
-                    allowed_prefixes.add("modules/player/infrastructure/")
-                    allowed_prefixes.add("modules/player/ports/")
 
                 if include.startswith("modules/") and not any(include.startswith(prefix) for prefix in allowed_prefixes):
                     fail(errors, f"{relative}: app 依赖越界 -> {include}")
