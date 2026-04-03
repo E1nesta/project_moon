@@ -1,7 +1,9 @@
-#include "common/error/error_code.h"
-#include "common/net/proto_mapper.h"
-#include "framework/protocol/error_responder.h"
-#include "framework/protocol/request_dispatcher.h"
+#include "runtime/foundation/error/error_code.h"
+#include "runtime/protocol/proto_mapper.h"
+#include "runtime/protocol/error_responder.h"
+#include "runtime/protocol/request_dispatcher.h"
+
+#include "game_backend.pb.h"
 
 #include <iostream>
 
@@ -50,6 +52,24 @@ int main() {
     const auto error_packet = framework::protocol::BuildErrorResponse(
         context.request, common::error::ErrorCode::kBadGateway, "bad request");
     if (!Expect(error_packet.header.request_id == 7, "error response should preserve request_id")) {
+        return 1;
+    }
+    if (!Expect(error_packet.header.msg_id == static_cast<std::uint32_t>(common::net::MessageId::kErrorResponse),
+                "error response should use error message id")) {
+        return 1;
+    }
+
+    game_backend::proto::ErrorResponse error_response;
+    if (!Expect(common::net::ParseMessage(error_packet.body, &error_response),
+                "error response should parse as ErrorResponse")) {
+        return 1;
+    }
+    if (!Expect(error_response.error_name() == "BAD_GATEWAY",
+                "error response should derive error_name from error code")) {
+        return 1;
+    }
+    if (!Expect(error_response.error_message() == "bad request",
+                "error response should preserve error message")) {
         return 1;
     }
 

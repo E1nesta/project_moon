@@ -1,15 +1,16 @@
-#include "common/build/build_info.h"
-#include "common/config/simple_config.h"
-#include "common/mysql/mysql_client.h"
-#include "common/mysql/mysql_client_pool.h"
-#include "common/redis/redis_client.h"
-#include "common/redis/redis_client_pool.h"
+#include "runtime/foundation/build/build_info.h"
+#include "runtime/foundation/config/simple_config.h"
+#include "runtime/storage/mysql/mysql_client.h"
+#include "runtime/storage/mysql/mysql_client_pool.h"
+#include "runtime/storage/redis/redis_client.h"
+#include "runtime/storage/redis/redis_client_pool.h"
 
 #include <arpa/inet.h>
 #include <netdb.h>
 #include <sys/socket.h>
 #include <unistd.h>
 
+#include <filesystem>
 #include <iostream>
 #include <string>
 
@@ -129,6 +130,109 @@ bool CheckExecutionConfig(const common::config::SimpleConfig& config, std::strin
     return true;
 }
 
+bool ValidateTlsConfig(const common::config::SimpleConfig& config,
+                       const std::string& prefix,
+                       bool require_cert_and_key,
+                       std::string* error_message) {
+    if (!config.GetBool(prefix + "enabled", false)) {
+        return true;
+    }
+
+    const auto cert_file = config.GetString(prefix + "cert_file");
+    const auto key_file = config.GetString(prefix + "key_file");
+    const auto ca_file = config.GetString(prefix + "ca_file");
+    const auto verify_peer = config.GetBool(prefix + "verify_peer", false);
+
+    if (require_cert_and_key) {
+        if (cert_file.empty() || key_file.empty()) {
+            if (error_message != nullptr) {
+                *error_message = prefix + "cert_file and key_file are required when TLS is enabled";
+            }
+            return false;
+        }
+        if (!std::filesystem::exists(cert_file) || !std::filesystem::exists(key_file)) {
+            if (error_message != nullptr) {
+                *error_message = prefix + "cert_file or key_file does not exist";
+            }
+            return false;
+        }
+    }
+
+    if (verify_peer && ca_file.empty()) {
+        if (error_message != nullptr) {
+            *error_message = prefix + "ca_file is required when verify_peer is enabled";
+        }
+        return false;
+    }
+
+    if (!ca_file.empty() && !std::filesystem::exists(ca_file)) {
+        if (error_message != nullptr) {
+            *error_message = prefix + "ca_file does not exist";
+        }
+        return false;
+    }
+
+    return true;
+}
+
+bool IsSupportedMode(const std::string& mode) {
+    return mode == "config" || mode == "live" || mode == "ready";
+}
+
+bool ValidateProductionSecrets(const common::config::SimpleConfig& config, std::string* error_message) {
+    const auto environment = config.GetString("runtime.environment", "local");
+    if (environment != "prod") {
+        return true;
+    }
+
+    if (config.Contains("storage.mysql.password")) {
+        const auto password = config.GetString("storage.mysql.password");
+        if (password.empty() || password == "gamepass") {
+            if (error_message != nullptr) {
+                *error_message = "prod requires non-default storage.mysql.password";
+            }
+            return false;
+        }
+    }
+
+    if (config.Contains("storage.redis.host")) {
+        const auto password = config.GetString("storage.redis.password");
+        if (password.empty()) {
+            if (error_message != nullptr) {
+                *error_message = "prod requires non-empty storage.redis.password";
+            }
+            return false;
+        }
+    }
+
+    return true;
+}
+
+bool ValidateTrustedGatewayConfig(const common::config::SimpleConfig& config, std::string* error_message) {
+    const auto service_name = config.GetString("service.name");
+    const bool requires_trusted_gateway = service_name == "gateway_server" || service_name == "login_server" ||
+                                          service_name == "player_server" || service_name == "dungeon_server";
+    if (!requires_trusted_gateway) {
+        return true;
+    }
+
+    if (config.GetString("security.trusted_gateway.shared_secret").empty()) {
+        if (error_message != nullptr) {
+            *error_message = "security.trusted_gateway.shared_secret is required";
+        }
+        return false;
+    }
+
+    if (config.GetInt("security.trusted_gateway.max_clock_skew_ms", 10000) <= 0) {
+        if (error_message != nullptr) {
+            *error_message = "security.trusted_gateway.max_clock_skew_ms must be > 0";
+        }
+        return false;
+    }
+
+    return true;
+}
+
 }  // namespace
 
 int main(int argc, char* argv[]) {
@@ -142,6 +246,10 @@ int main(int argc, char* argv[]) {
         std::cerr << "missing --config\n";
         return 1;
     }
+    if (!IsSupportedMode(options.mode)) {
+        std::cerr << "unsupported --mode: " << options.mode << '\n';
+        return 1;
+    }
 
     common::config::SimpleConfig config;
     if (!config.LoadFromFile(options.config_path)) {
@@ -149,11 +257,36 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    if (options.mode == "config") {
+    std::string error_message;
+    if (!ValidateProductionSecrets(config, &error_message)) {
+        std::cerr << "config invalid: " << error_message << '\n';
+        return 1;
+    }
+
+    if (!ValidateTrustedGatewayConfig(config, &error_message)) {
+        std::cerr << "trusted gateway config invalid: " << error_message << '\n';
+        return 1;
+    }
+
+    if (!CheckExecutionConfig(config, &error_message)) {
+        std::cerr << "execution config invalid: " << error_message << '\n';
+        return 1;
+    }
+
+    if (!ValidateTlsConfig(config, "transport.tls.", true, &error_message) ||
+        !ValidateTlsConfig(config, "client.tls.", false, &error_message) ||
+        !ValidateTlsConfig(config, "upstream.tls.", false, &error_message) ||
+        !ValidateTlsConfig(config, "upstream.login.tls.", false, &error_message) ||
+        !ValidateTlsConfig(config, "upstream.player.tls.", false, &error_message) ||
+        !ValidateTlsConfig(config, "upstream.dungeon.tls.", false, &error_message)) {
+        std::cerr << "tls config invalid: " << error_message << '\n';
+        return 1;
+    }
+
+    if (options.mode == "config" || options.mode == "live") {
         return 0;
     }
 
-    std::string error_message;
     if (config.Contains("storage.mysql.host")) {
         common::mysql::MySqlClientPool mysql_pool(
             common::mysql::ReadConnectionOptions(config),
@@ -172,11 +305,6 @@ int main(int argc, char* argv[]) {
             std::cerr << "redis not ready: " << error_message << '\n';
             return 1;
         }
-    }
-
-    if (!CheckExecutionConfig(config, &error_message)) {
-        std::cerr << "execution config invalid: " << error_message << '\n';
-        return 1;
     }
 
     const auto timeout_ms = config.GetInt("upstream.timeout_ms", config.GetInt("client.timeout_ms", 2000));

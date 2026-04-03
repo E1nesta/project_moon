@@ -107,14 +107,14 @@ fi
 
 LOGIN_GATEWAY=""
 for service in gateway_1 gateway_2; do
-  if compose_cmd logs "$service" --since "$LOGIN_MARK" | grep -q "$SESSION_ID"; then
+  if compose_cmd logs "$service" --since "$LOGIN_MARK" | grep -Eq "event=gateway_forward_(started|succeeded).*upstream_service=login"; then
     LOGIN_GATEWAY="$service"
     break
   fi
 done
 
 if [[ -z "$LOGIN_GATEWAY" ]]; then
-  echo "failed to identify which gateway handled login for session $SESSION_ID" >&2
+  echo "failed to identify which gateway handled the login request after $LOGIN_MARK" >&2
   exit 1
 fi
 

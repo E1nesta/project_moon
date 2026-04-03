@@ -1,7 +1,7 @@
-#include "common/security/password_hasher.h"
-#include "login_server/auth/in_memory_account_repository.h"
-#include "login_server/login_service.h"
-#include "login_server/session/in_memory_session_repository.h"
+#include "runtime/foundation/security/password_hasher.h"
+#include "modules/login/infrastructure/in_memory_account_repository.h"
+#include "modules/login/application/login_service.h"
+#include "runtime/session/in_memory_session_store.h"
 
 #include <fstream>
 #include <iostream>
@@ -21,7 +21,7 @@ bool Expect(bool condition, const std::string& message) {
 
 int main() {
     common::config::SimpleConfig config;
-    login_server::session::InMemorySessionRepository session_repository;
+    common::session::InMemorySessionStore session_repository;
 
     const auto demo_hash = common::security::PasswordHasher::BuildEncodedHash("demo123", "login-test-salt");
     if (!Expect(demo_hash.has_value(), "failed to build demo password hash")) {

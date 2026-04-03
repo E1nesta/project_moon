@@ -5,15 +5,19 @@ package game_backend.proto;
 message RequestContext {
   string trace_id = 1;
   uint64 request_id = 2;
-  string session_id = 3;
+  string auth_token = 3;
   int64 player_id = 4;
+  int64 account_id = 5;
+  int64 gateway_timestamp_ms = 6;
+  string gateway_signature = 7;
 }
 
 message ResponseContext {
   string trace_id = 1;
   uint64 request_id = 2;
-  string session_id = 3;
+  string auth_token = 3;
   int64 player_id = 4;
+  int64 account_id = 5;
 }
 
 message PingRequest {
@@ -67,14 +71,11 @@ message LoginRequest {
 
 message LoginResponse {
   ResponseContext context = 1;
-  bool success = 2;
-  int32 error_code = 3;
-  string error_name = 4;
-  string error_message = 5;
-  string session_id = 6;
+  reserved 2 to 5;
+  string auth_token = 6;
   int64 account_id = 7;
   int64 player_id = 8;
-  int64 created_at_epoch_seconds = 9;
+  int64 expires_at_epoch_seconds = 9;
 }
 
 message LoadPlayerRequest {
@@ -84,10 +85,7 @@ message LoadPlayerRequest {
 
 message LoadPlayerResponse {
   ResponseContext context = 1;
-  bool success = 2;
-  int32 error_code = 3;
-  string error_name = 4;
-  string error_message = 5;
+  reserved 2 to 5;
   PlayerState player_state = 6;
   bool loaded_from_cache = 7;
 }
@@ -100,10 +98,7 @@ message EnterDungeonRequest {
 
 message EnterDungeonResponse {
   ResponseContext context = 1;
-  bool success = 2;
-  int32 error_code = 3;
-  string error_name = 4;
-  string error_message = 5;
+  reserved 2 to 5;
   string battle_id = 6;
   int32 remain_stamina = 7;
 }
@@ -119,10 +114,7 @@ message SettleDungeonRequest {
 
 message SettleDungeonResponse {
   ResponseContext context = 1;
-  bool success = 2;
-  int32 error_code = 3;
-  string error_name = 4;
-  string error_message = 5;
+  reserved 2 to 5;
   bool first_clear = 6;
   repeated Reward rewards = 7;
 }

@@ -1,6 +1,5 @@
-#include "game_server/player/in_memory_player_repository.h"
-#include "game_server/player/player_service.h"
-#include "login_server/session/in_memory_session_repository.h"
+#include "modules/player/infrastructure/in_memory_player_repository.h"
+#include "modules/player/application/player_service.h"
 
 #include <fstream>
 #include <iostream>
@@ -62,13 +61,11 @@ int main() {
         return 1;
     }
 
-    login_server::session::InMemorySessionRepository session_repository;
-    auto session = session_repository.Create(10001, 20001);
     auto player_repository = game_server::player::InMemoryPlayerRepository::FromConfig(config);
     InMemoryPlayerCacheRepository cache_repository;
-    game_server::player::PlayerService player_service(session_repository, player_repository, cache_repository);
+    game_server::player::PlayerService player_service(player_repository, cache_repository);
 
-    const auto first_load = player_service.LoadPlayer(session.session_id, 20001);
+    const auto first_load = player_service.LoadPlayer(20001);
     if (!Expect(first_load.success, "expected first load to succeed")) {
         return 1;
     }
@@ -76,7 +73,7 @@ int main() {
         return 1;
     }
 
-    const auto second_load = player_service.LoadPlayer(session.session_id, 20001);
+    const auto second_load = player_service.LoadPlayer(20001);
     if (!Expect(second_load.success, "expected second load to succeed")) {
         return 1;
     }
@@ -84,12 +81,12 @@ int main() {
         return 1;
     }
 
-    const auto invalid_session = player_service.LoadPlayer("invalid-session", 20001);
-    if (!Expect(!invalid_session.success, "expected invalid session load to fail")) {
+    const auto missing_player = player_service.LoadPlayer(99999);
+    if (!Expect(!missing_player.success, "expected missing player load to fail")) {
         return 1;
     }
-    if (!Expect(invalid_session.error_code == common::error::ErrorCode::kSessionInvalid,
-                "expected invalid session error code")) {
+    if (!Expect(missing_player.error_code == common::error::ErrorCode::kPlayerNotFound,
+                "expected player not found error code")) {
         return 1;
     }
 

@@ -11,6 +11,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libprotobuf-dev \
     libboost-dev \
     libboost-system-dev \
+    libspdlog-dev \
     default-libmysqlclient-dev \
     libhiredis-dev \
     libssl-dev \
@@ -31,6 +32,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libprotobuf-dev \
     libboost-dev \
     libboost-system-dev \
+    libspdlog-dev \
     default-libmysqlclient-dev \
     libhiredis-dev \
     libssl-dev \

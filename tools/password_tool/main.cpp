@@ -1,5 +1,5 @@
-#include "common/build/build_info.h"
-#include "common/security/password_hasher.h"
+#include "runtime/foundation/build/build_info.h"
+#include "runtime/foundation/security/password_hasher.h"
 
 #include <iostream>
 #include <string>

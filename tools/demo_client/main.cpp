@@ -1,13 +1,15 @@
-#include "common/config/simple_config.h"
-#include "common/error/error_code.h"
-#include "common/log/logger.h"
-#include "common/mysql/mysql_client.h"
-#include "common/net/message_id.h"
-#include "common/net/proto_codec.h"
-#include "common/net/proto_mapper.h"
-#include "common/redis/redis_client.h"
-#include "framework/transport/transport_client.h"
-#include "login_server/auth/mysql_account_repository.h"
+#include "runtime/foundation/config/simple_config.h"
+#include "runtime/foundation/error/error_code.h"
+#include "runtime/foundation/log/logger.h"
+#include "runtime/observability/structured_log.h"
+#include "runtime/storage/mysql/mysql_client.h"
+#include "runtime/protocol/message_id.h"
+#include "runtime/protocol/proto_codec.h"
+#include "runtime/protocol/proto_mapper.h"
+#include "runtime/storage/redis/redis_client.h"
+#include "runtime/transport/transport_client.h"
+#include "runtime/transport/tls_options.h"
+#include "modules/login/infrastructure/mysql_account_repository.h"
 
 #include "game_backend.pb.h"
 
@@ -51,6 +53,9 @@ struct CallResult {
     std::string error_message;
     common::net::Packet packet;
 };
+
+void EmitToolLog(common::log::LogLevel level, const framework::observability::LogEntry& entry);
+framework::observability::LogEntry NewToolEvent(std::string_view event);
 
 std::optional<common::error::ErrorCode> ParseErrorCode(std::string_view value) {
     using common::error::ErrorCode;
@@ -111,6 +116,21 @@ std::optional<common::error::ErrorCode> ParseErrorCode(std::string_view value) {
     }
     if (value == "BAD_GATEWAY") {
         return ErrorCode::kBadGateway;
+    }
+    if (value == "RATE_LIMITED") {
+        return ErrorCode::kRateLimited;
+    }
+    if (value == "REQUEST_CONTEXT_INVALID") {
+        return ErrorCode::kRequestContextInvalid;
+    }
+    if (value == "MESSAGE_NOT_SUPPORTED") {
+        return ErrorCode::kMessageNotSupported;
+    }
+    if (value == "TRUSTED_GATEWAY_INVALID") {
+        return ErrorCode::kTrustedGatewayInvalid;
+    }
+    if (value == "UPSTREAM_RESPONSE_INVALID") {
+        return ErrorCode::kUpstreamResponseInvalid;
     }
 
     return std::nullopt;
@@ -191,7 +211,10 @@ bool LoadConfig(const std::string& path, common::config::SimpleConfig& config) {
         return true;
     }
 
-    common::log::Logger::Instance().Log(common::log::LogLevel::kError, "failed to load config file: " + path);
+    auto entry = NewToolEvent("demo_client_config_load_failed");
+    entry.Add("config_path", path);
+    entry.Add("message", "failed to load config file");
+    EmitToolLog(common::log::LogLevel::kError, entry);
     return false;
 }
 
@@ -204,12 +227,24 @@ std::string FormatError(common::error::ErrorCode code, const std::string& messag
     return output.str();
 }
 
+void EmitToolLog(common::log::LogLevel level, const framework::observability::LogEntry& entry) {
+    common::log::Logger::Instance().Log(level, entry.Build());
+}
+
+framework::observability::LogEntry NewToolEvent(std::string_view event) {
+    framework::observability::LogEntry entry;
+    entry.Add("event", event);
+    return entry;
+}
+
 bool Require(bool condition, const std::string& message) {
     if (condition) {
         return true;
     }
 
-    common::log::Logger::Instance().Log(common::log::LogLevel::kError, message);
+    auto entry = NewToolEvent("demo_client_assertion_failed");
+    entry.Add("message", message);
+    EmitToolLog(common::log::LogLevel::kError, entry);
     return false;
 }
 
@@ -217,22 +252,27 @@ bool RequireExpectedError(const CallResult& result,
                           common::error::ErrorCode expected_error,
                           const std::string& label) {
     if (result.ok) {
-        common::log::Logger::Instance().Log(common::log::LogLevel::kError,
-                                            label + " should fail with " +
-                                                std::string(common::error::ToString(expected_error)));
+        auto entry = NewToolEvent("demo_client_expected_error_missing");
+        entry.Add("operation", label);
+        entry.Add("expected_error_code", std::string(common::error::ToString(expected_error)));
+        EmitToolLog(common::log::LogLevel::kError, entry);
         return false;
     }
 
     if (result.error_code != expected_error) {
-        common::log::Logger::Instance().Log(common::log::LogLevel::kError,
-                                            label + " failed with " + FormatError(result.error_code, result.error_message) +
-                                                ", expected error_code=" + std::string(common::error::ToString(expected_error)));
+        auto entry = NewToolEvent("demo_client_expected_error_mismatch");
+        entry.Add("operation", label);
+        entry.Add("error_code", std::string(common::error::ToString(result.error_code)));
+        entry.Add("expected_error_code", std::string(common::error::ToString(expected_error)));
+        entry.Add("message", result.error_message);
+        EmitToolLog(common::log::LogLevel::kError, entry);
         return false;
     }
 
-    common::log::Logger::Instance().Log(common::log::LogLevel::kInfo,
-                                        label + " produced expected error_code=" +
-                                            std::string(common::error::ToString(expected_error)));
+    auto entry = NewToolEvent("demo_client_expected_error_observed");
+    entry.Add("operation", label);
+    entry.Add("error_code", std::string(common::error::ToString(expected_error)));
+    EmitToolLog(common::log::LogLevel::kInfo, entry);
     return true;
 }
 
@@ -247,7 +287,9 @@ void LogRewards(const google::protobuf::RepeatedPtrField<game_backend::proto::Re
         output << reward.reward_type() << ':' << reward.amount();
         first = false;
     }
-    common::log::Logger::Instance().Log(common::log::LogLevel::kInfo, output.str());
+    auto entry = NewToolEvent("demo_client_rewards_observed");
+    entry.Add("rewards", output.str().substr(std::string("rewards=").size()));
+    EmitToolLog(common::log::LogLevel::kInfo, entry);
 }
 
 common::net::RequestContext BuildContext(std::uint64_t request_id,
@@ -256,7 +298,7 @@ common::net::RequestContext BuildContext(std::uint64_t request_id,
     common::net::RequestContext context;
     context.trace_id = "demo-client-" + std::to_string(request_id);
     context.request_id = request_id;
-    context.session_id = session_id;
+    context.auth_token = session_id;
     context.player_id = player_id;
     return context;
 }
@@ -289,7 +331,11 @@ void ResetDemoState(common::mysql::MySqlClient& mysql_client,
     redis_client.Del("player:snapshot:" + std::to_string(player_id));
     redis_client.Del("player:lock:" + std::to_string(player_id));
 
-    common::log::Logger::Instance().Log(common::log::LogLevel::kInfo, "demo state reset complete");
+    auto entry = NewToolEvent("demo_client_state_reset_completed");
+    entry.Add("account_id", account_id);
+    entry.Add("player_id", player_id);
+    entry.Add("dungeon_id", static_cast<std::int64_t>(dungeon_id));
+    EmitToolLog(common::log::LogLevel::kInfo, entry);
 }
 
 template <typename RequestT>
@@ -360,11 +406,17 @@ int main(int argc, char* argv[]) {
         common::redis::RedisClient redis_client(common::redis::ReadConnectionOptions(player_config));
         std::string error_message;
         if (!mysql_client.Connect(&error_message)) {
-            common::log::Logger::Instance().Log(common::log::LogLevel::kError, "mysql connect failed: " + error_message);
+            auto entry = NewToolEvent("demo_client_dependency_connect_failed");
+            entry.Add("dependency", "mysql");
+            entry.Add("message", error_message);
+            EmitToolLog(common::log::LogLevel::kError, entry);
             return 1;
         }
         if (!redis_client.Connect(&error_message)) {
-            common::log::Logger::Instance().Log(common::log::LogLevel::kError, "redis connect failed: " + error_message);
+            auto entry = NewToolEvent("demo_client_dependency_connect_failed");
+            entry.Add("dependency", "redis");
+            entry.Add("message", error_message);
+            EmitToolLog(common::log::LogLevel::kError, entry);
             return 1;
         }
 
@@ -381,9 +433,13 @@ int main(int argc, char* argv[]) {
     const auto gateway_host = gateway_config.GetString("client.host", "127.0.0.1");
     const auto gateway_port = gateway_config.GetInt("port", 7000);
     const auto gateway_timeout_ms = gateway_config.GetInt("client.timeout_ms", 3000);
+    auto gateway_tls = framework::transport::ReadTlsOptions(gateway_config, "client.tls.");
+    if (gateway_tls.server_name.empty()) {
+        gateway_tls.server_name = gateway_host;
+    }
 
-    framework::transport::TransportClient primary_client(gateway_host, gateway_port, gateway_timeout_ms);
-    framework::transport::TransportClient recovery_client(gateway_host, gateway_port, gateway_timeout_ms);
+    framework::transport::TransportClient primary_client(gateway_host, gateway_port, gateway_timeout_ms, gateway_tls);
+    framework::transport::TransportClient recovery_client(gateway_host, gateway_port, gateway_timeout_ms, gateway_tls);
     framework::transport::TransportClient* active_client = &primary_client;
 
     std::uint64_t request_id = 1;
@@ -414,18 +470,10 @@ int main(int argc, char* argv[]) {
                      "failed to parse load-only response")) {
             return 1;
         }
-        if (!Require(load_response.success(),
-                     "load-only request failed: " +
-                         FormatError(static_cast<common::error::ErrorCode>(load_response.error_code()),
-                                     load_response.error_message()))) {
-            return 1;
-        }
-
-        std::ostringstream summary;
-        summary << "load-only success"
-                << ", player_id=" << load_response.player_state().profile().player_id()
-                << ", cache=" << (load_response.loaded_from_cache() ? "hit" : "miss");
-        common::log::Logger::Instance().Log(common::log::LogLevel::kInfo, summary.str());
+        auto entry = NewToolEvent("demo_client_load_only_succeeded");
+        entry.Add("player_id", load_response.player_state().profile().player_id());
+        entry.Add("cache", load_response.loaded_from_cache() ? "hit" : "miss");
+        EmitToolLog(common::log::LogLevel::kInfo, entry);
         return 0;
     }
 
@@ -442,22 +490,15 @@ int main(int argc, char* argv[]) {
     if (!Require(common::net::ParseMessage(login_call.packet.body, &login_response), "failed to parse login response")) {
         return 1;
     }
-    if (!Require(login_response.success(),
-                 "login failed: " +
-                     FormatError(static_cast<common::error::ErrorCode>(login_response.error_code()),
-                                 login_response.error_message()))) {
-        return 1;
-    }
-
-    std::ostringstream login_summary;
-    login_summary << "login success"
-                  << ", session_id=" << login_response.session_id()
-                  << ", account_id=" << login_response.account_id()
-                  << ", player_id=" << login_response.player_id();
-    common::log::Logger::Instance().Log(common::log::LogLevel::kInfo, login_summary.str());
+    auto login_entry = NewToolEvent("demo_client_login_succeeded");
+    login_entry.Add("account_name", options.account_name);
+    login_entry.Add("auth_token", framework::observability::MaskAuthToken(login_response.auth_token()));
+    login_entry.Add("account_id", login_response.account_id());
+    login_entry.Add("player_id", login_response.player_id());
+    EmitToolLog(common::log::LogLevel::kInfo, login_entry);
 
     if (options.scenario == DemoScenario::kLoginOnly) {
-        std::cout << "SESSION_ID=" << login_response.session_id() << '\n';
+        std::cout << "SESSION_ID=" << login_response.auth_token() << '\n';
         std::cout << "ACCOUNT_ID=" << login_response.account_id() << '\n';
         std::cout << "PLAYER_ID=" << login_response.player_id() << '\n';
         return 0;
@@ -468,7 +509,7 @@ int main(int argc, char* argv[]) {
     if (options.verify_session_recovery) {
         const auto recovery_call = SendMessage(recovery_client,
                                                common::net::MessageId::kLoadPlayerRequest,
-                                               BuildContext(request_id++, login_response.session_id(), login_response.player_id()),
+                                               BuildContext(request_id++, login_response.auth_token(), login_response.player_id()),
                                                &load_request);
         if (!Require(recovery_call.ok,
                      "session recovery load failed: " +
@@ -481,18 +522,10 @@ int main(int argc, char* argv[]) {
                      "failed to parse session recovery load response")) {
             return 1;
         }
-        if (!Require(recovery_response.success(),
-                     "session recovery load failed: " +
-                         FormatError(static_cast<common::error::ErrorCode>(recovery_response.error_code()),
-                                     recovery_response.error_message()))) {
-            return 1;
-        }
-
-        std::ostringstream recovery_summary;
-        recovery_summary << "session recovery success"
-                         << ", player_id=" << recovery_response.player_state().profile().player_id()
-                         << ", cache=" << (recovery_response.loaded_from_cache() ? "hit" : "miss");
-        common::log::Logger::Instance().Log(common::log::LogLevel::kInfo, recovery_summary.str());
+        auto recovery_entry = NewToolEvent("demo_client_session_recovery_succeeded");
+        recovery_entry.Add("player_id", recovery_response.player_state().profile().player_id());
+        recovery_entry.Add("cache", recovery_response.loaded_from_cache() ? "hit" : "miss");
+        EmitToolLog(common::log::LogLevel::kInfo, recovery_entry);
 
         primary_client.Close();
         active_client = &recovery_client;
@@ -500,7 +533,7 @@ int main(int argc, char* argv[]) {
 
     const auto load_call = SendMessage(*active_client,
                                        common::net::MessageId::kLoadPlayerRequest,
-                                       BuildContext(request_id++, login_response.session_id(), login_response.player_id()),
+                                       BuildContext(request_id++, login_response.auth_token(), login_response.player_id()),
                                        &load_request);
     if (!Require(load_call.ok, "load player failed: " + FormatError(load_call.error_code, load_call.error_message))) {
         return 1;
@@ -510,28 +543,20 @@ int main(int argc, char* argv[]) {
     if (!Require(common::net::ParseMessage(load_call.packet.body, &load_response), "failed to parse load player response")) {
         return 1;
     }
-    if (!Require(load_response.success(),
-                 "load player failed: " +
-                     FormatError(static_cast<common::error::ErrorCode>(load_response.error_code()),
-                                 load_response.error_message()))) {
-        return 1;
-    }
-
-    std::ostringstream player_summary;
-    player_summary << "load player success"
-                   << ", cache=" << (load_response.loaded_from_cache() ? "hit" : "miss")
-                   << ", player_id=" << load_response.player_state().profile().player_id()
-                   << ", level=" << load_response.player_state().profile().level()
-                   << ", stamina=" << load_response.player_state().profile().stamina()
-                   << ", gold=" << load_response.player_state().profile().gold()
-                   << ", diamond=" << load_response.player_state().profile().diamond();
-    common::log::Logger::Instance().Log(common::log::LogLevel::kInfo, player_summary.str());
+    auto player_entry = NewToolEvent("demo_client_load_player_succeeded");
+    player_entry.Add("cache", load_response.loaded_from_cache() ? "hit" : "miss");
+    player_entry.Add("player_id", load_response.player_state().profile().player_id());
+    player_entry.Add("level", load_response.player_state().profile().level());
+    player_entry.Add("stamina", load_response.player_state().profile().stamina());
+    player_entry.Add("gold", load_response.player_state().profile().gold());
+    player_entry.Add("diamond", load_response.player_state().profile().diamond());
+    EmitToolLog(common::log::LogLevel::kInfo, player_entry);
 
     game_backend::proto::LoadPlayerRequest second_load_request;
     second_load_request.set_player_id(login_response.player_id());
     const auto second_load_call = SendMessage(*active_client,
                                               common::net::MessageId::kLoadPlayerRequest,
-                                              BuildContext(request_id++, login_response.session_id(), login_response.player_id()),
+                                              BuildContext(request_id++, login_response.auth_token(), login_response.player_id()),
                                               &second_load_request);
     if (!Require(second_load_call.ok, "second load failed: " + FormatError(second_load_call.error_code, second_load_call.error_message))) {
         return 1;
@@ -542,7 +567,7 @@ int main(int argc, char* argv[]) {
                  "failed to parse second load player response")) {
         return 1;
     }
-    if (!Require(second_load_response.success() && second_load_response.loaded_from_cache(),
+    if (!Require(second_load_response.loaded_from_cache(),
                  "second load should hit cache")) {
         return 1;
     }
@@ -553,7 +578,7 @@ int main(int argc, char* argv[]) {
     enter_request.set_dungeon_id(dungeon_id);
     const auto enter_call = SendMessage(*active_client,
                                         common::net::MessageId::kEnterDungeonRequest,
-                                        BuildContext(request_id++, login_response.session_id(), login_response.player_id()),
+                                        BuildContext(request_id++, login_response.auth_token(), login_response.player_id()),
                                         &enter_request);
     if (options.expected_enter_error.has_value()) {
         return RequireExpectedError(enter_call, *options.expected_enter_error, "enter dungeon request") ? 0 : 1;
@@ -566,18 +591,12 @@ int main(int argc, char* argv[]) {
     if (!Require(common::net::ParseMessage(enter_call.packet.body, &enter_response), "failed to parse enter dungeon response")) {
         return 1;
     }
-    if (!Require(enter_response.success(),
-                 "enter dungeon failed: " +
-                     FormatError(static_cast<common::error::ErrorCode>(enter_response.error_code()),
-                                 enter_response.error_message()))) {
-        return 1;
-    }
-
-    std::ostringstream enter_summary;
-    enter_summary << "enter dungeon success"
-                  << ", battle_id=" << enter_response.battle_id()
-                  << ", remain_stamina=" << enter_response.remain_stamina();
-    common::log::Logger::Instance().Log(common::log::LogLevel::kInfo, enter_summary.str());
+    auto enter_entry = NewToolEvent("demo_client_enter_dungeon_succeeded");
+    enter_entry.Add("player_id", login_response.player_id());
+    enter_entry.Add("dungeon_id", static_cast<std::int64_t>(dungeon_id));
+    enter_entry.Add("battle_id", enter_response.battle_id());
+    enter_entry.Add("remain_stamina", enter_response.remain_stamina());
+    EmitToolLog(common::log::LogLevel::kInfo, enter_entry);
 
     game_backend::proto::SettleDungeonRequest settle_request;
     settle_request.set_player_id(login_response.player_id());
@@ -587,7 +606,7 @@ int main(int argc, char* argv[]) {
     settle_request.set_result(true);
     const auto settle_call = SendMessage(*active_client,
                                          common::net::MessageId::kSettleDungeonRequest,
-                                         BuildContext(request_id++, login_response.session_id(), login_response.player_id()),
+                                         BuildContext(request_id++, login_response.auth_token(), login_response.player_id()),
                                          &settle_request);
     if (!Require(settle_call.ok, "settle dungeon failed: " + FormatError(settle_call.error_code, settle_call.error_message))) {
         return 1;
@@ -597,23 +616,19 @@ int main(int argc, char* argv[]) {
     if (!Require(common::net::ParseMessage(settle_call.packet.body, &settle_response), "failed to parse settle response")) {
         return 1;
     }
-    if (!Require(settle_response.success(),
-                 "settle dungeon failed: " +
-                     FormatError(static_cast<common::error::ErrorCode>(settle_response.error_code()),
-                                 settle_response.error_message()))) {
-        return 1;
-    }
-
-    common::log::Logger::Instance().Log(common::log::LogLevel::kInfo,
-                                        "settle dungeon success, first_clear=" +
-                                            std::string(settle_response.first_clear() ? "true" : "false"));
+    auto settle_entry = NewToolEvent("demo_client_settle_dungeon_succeeded");
+    settle_entry.Add("player_id", login_response.player_id());
+    settle_entry.Add("dungeon_id", static_cast<std::int64_t>(dungeon_id));
+    settle_entry.Add("battle_id", enter_response.battle_id());
+    settle_entry.Add("first_clear", settle_response.first_clear() ? "true" : "false");
+    EmitToolLog(common::log::LogLevel::kInfo, settle_entry);
     LogRewards(settle_response.rewards());
 
     game_backend::proto::LoadPlayerRequest refresh_request;
     refresh_request.set_player_id(login_response.player_id());
     const auto refresh_call = SendMessage(*active_client,
                                           common::net::MessageId::kLoadPlayerRequest,
-                                          BuildContext(request_id++, login_response.session_id(), login_response.player_id()),
+                                          BuildContext(request_id++, login_response.auth_token(), login_response.player_id()),
                                           &refresh_request);
     if (!Require(refresh_call.ok, "reload player failed: " + FormatError(refresh_call.error_code, refresh_call.error_message))) {
         return 1;
@@ -623,17 +638,13 @@ int main(int argc, char* argv[]) {
     if (!Require(common::net::ParseMessage(refresh_call.packet.body, &refresh_response), "failed to parse reload response")) {
         return 1;
     }
-    if (!Require(refresh_response.success(), "reload player after settlement failed")) {
-        return 1;
-    }
-
-    std::ostringstream refresh_summary;
-    refresh_summary << "reload player success"
-                    << ", stamina=" << refresh_response.player_state().profile().stamina()
-                    << ", gold=" << refresh_response.player_state().profile().gold()
-                    << ", diamond=" << refresh_response.player_state().profile().diamond()
-                    << ", dungeon_progress_count=" << refresh_response.player_state().dungeon_progress_size();
-    common::log::Logger::Instance().Log(common::log::LogLevel::kInfo, refresh_summary.str());
+    auto refresh_entry = NewToolEvent("demo_client_reload_player_succeeded");
+    refresh_entry.Add("player_id", login_response.player_id());
+    refresh_entry.Add("stamina", refresh_response.player_state().profile().stamina());
+    refresh_entry.Add("gold", refresh_response.player_state().profile().gold());
+    refresh_entry.Add("diamond", refresh_response.player_state().profile().diamond());
+    refresh_entry.Add("dungeon_progress_count", static_cast<std::int64_t>(refresh_response.player_state().dungeon_progress_size()));
+    EmitToolLog(common::log::LogLevel::kInfo, refresh_entry);
 
     if (options.run_negative_cases) {
         game_backend::proto::LoginRequest wrong_password_request;
@@ -644,18 +655,8 @@ int main(int argc, char* argv[]) {
                         common::net::MessageId::kLoginRequest,
                         BuildContext(request_id++),
                         &wrong_password_request);
-        if (!Require(wrong_password_call.ok, "wrong password request transport failed")) {
-            return 1;
-        }
-        game_backend::proto::LoginResponse wrong_password_response;
-        if (!Require(common::net::ParseMessage(wrong_password_call.packet.body, &wrong_password_response),
-                     "failed to parse wrong password response")) {
-            return 1;
-        }
-        if (!Require(!wrong_password_response.success() &&
-                         static_cast<common::error::ErrorCode>(wrong_password_response.error_code()) ==
-                             common::error::ErrorCode::kInvalidPassword,
-                     "invalid password case should be rejected")) {
+        if (!RequireExpectedError(
+                wrong_password_call, common::error::ErrorCode::kInvalidPassword, "wrong password request")) {
             return 1;
         }
 
@@ -679,20 +680,11 @@ int main(int argc, char* argv[]) {
         duplicate_settle_request.set_result(true);
         const auto duplicate_settle_call = SendMessage(*active_client,
                                                        common::net::MessageId::kSettleDungeonRequest,
-                                                       BuildContext(request_id++, login_response.session_id(), login_response.player_id()),
+                                                       BuildContext(request_id++, login_response.auth_token(), login_response.player_id()),
                                                        &duplicate_settle_request);
-        if (!Require(duplicate_settle_call.ok, "duplicate settle transport failed")) {
-            return 1;
-        }
-        game_backend::proto::SettleDungeonResponse duplicate_settle_response;
-        if (!Require(common::net::ParseMessage(duplicate_settle_call.packet.body, &duplicate_settle_response),
-                     "failed to parse duplicate settle response")) {
-            return 1;
-        }
-        if (!Require(!duplicate_settle_response.success() &&
-                         static_cast<common::error::ErrorCode>(duplicate_settle_response.error_code()) ==
-                             common::error::ErrorCode::kBattleAlreadySettled,
-                     "duplicate settlement should be rejected")) {
+        if (!RequireExpectedError(duplicate_settle_call,
+                                  common::error::ErrorCode::kBattleAlreadySettled,
+                                  "duplicate settle request")) {
             return 1;
         }
 
@@ -701,7 +693,7 @@ int main(int argc, char* argv[]) {
         invalid_star_enter_request.set_dungeon_id(dungeon_id);
         const auto invalid_star_enter_call = SendMessage(*active_client,
                                                          common::net::MessageId::kEnterDungeonRequest,
-                                                         BuildContext(request_id++, login_response.session_id(), login_response.player_id()),
+                                                         BuildContext(request_id++, login_response.auth_token(), login_response.player_id()),
                                                          &invalid_star_enter_request);
         if (!Require(invalid_star_enter_call.ok, "second enter for invalid-star case transport failed")) {
             return 1;
@@ -711,10 +703,6 @@ int main(int argc, char* argv[]) {
                      "failed to parse invalid star enter response")) {
             return 1;
         }
-        if (!Require(invalid_star_enter_response.success(), "second enter for invalid-star case should succeed")) {
-            return 1;
-        }
-
         game_backend::proto::SettleDungeonRequest invalid_star_settle_request;
         invalid_star_settle_request.set_player_id(login_response.player_id());
         invalid_star_settle_request.set_battle_id(invalid_star_enter_response.battle_id());
@@ -723,24 +711,16 @@ int main(int argc, char* argv[]) {
         invalid_star_settle_request.set_result(true);
         const auto invalid_star_settle_call = SendMessage(*active_client,
                                                           common::net::MessageId::kSettleDungeonRequest,
-                                                          BuildContext(request_id++, login_response.session_id(), login_response.player_id()),
+                                                          BuildContext(request_id++, login_response.auth_token(), login_response.player_id()),
                                                           &invalid_star_settle_request);
-        if (!Require(invalid_star_settle_call.ok, "invalid star settle transport failed")) {
-            return 1;
-        }
-        game_backend::proto::SettleDungeonResponse invalid_star_settle_response;
-        if (!Require(common::net::ParseMessage(invalid_star_settle_call.packet.body, &invalid_star_settle_response),
-                     "failed to parse invalid star settle response")) {
-            return 1;
-        }
-        if (!Require(!invalid_star_settle_response.success() &&
-                         static_cast<common::error::ErrorCode>(invalid_star_settle_response.error_code()) ==
-                             common::error::ErrorCode::kInvalidStar,
-                     "invalid star should be rejected")) {
+        if (!RequireExpectedError(
+                invalid_star_settle_call, common::error::ErrorCode::kInvalidStar, "invalid star settle request")) {
             return 1;
         }
     }
 
-    common::log::Logger::Instance().Log(common::log::LogLevel::kInfo, "demo client flow completed successfully");
+    auto done_entry = NewToolEvent("demo_client_completed");
+    done_entry.Add("account_name", options.account_name);
+    EmitToolLog(common::log::LogLevel::kInfo, done_entry);
     return 0;
 }

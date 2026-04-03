@@ -1,21 +1,22 @@
-#include "common/config/simple_config.h"
-#include "common/error/error_code.h"
-#include "common/log/logger.h"
-#include "common/mysql/mysql_client.h"
-#include "common/mysql/mysql_client_pool.h"
-#include "common/redis/redis_client.h"
-#include "common/redis/redis_client_pool.h"
-#include "dungeon_server/dungeon/dungeon_service.h"
-#include "dungeon_server/dungeon/in_memory_dungeon_config_repository.h"
-#include "dungeon_server/dungeon/mysql_dungeon_repository.h"
-#include "dungeon_server/dungeon/redis_battle_context_repository.h"
-#include "dungeon_server/dungeon/redis_player_lock_repository.h"
-#include "game_server/player/mysql_player_repository.h"
-#include "game_server/player/player_service.h"
-#include "game_server/player/redis_player_cache_repository.h"
-#include "login_server/auth/mysql_account_repository.h"
-#include "login_server/login_service.h"
-#include "login_server/session/redis_session_repository.h"
+#include "runtime/foundation/config/simple_config.h"
+#include "runtime/foundation/error/error_code.h"
+#include "runtime/foundation/log/logger.h"
+#include "runtime/observability/structured_log.h"
+#include "runtime/storage/mysql/mysql_client.h"
+#include "runtime/storage/mysql/mysql_client_pool.h"
+#include "runtime/storage/redis/redis_client.h"
+#include "runtime/storage/redis/redis_client_pool.h"
+#include "modules/dungeon/application/dungeon_service.h"
+#include "modules/dungeon/infrastructure/in_memory_dungeon_config_repository.h"
+#include "modules/dungeon/infrastructure/mysql_dungeon_repository.h"
+#include "modules/dungeon/infrastructure/redis_battle_context_repository.h"
+#include "modules/dungeon/infrastructure/redis_player_lock_repository.h"
+#include "modules/player/infrastructure/mysql_player_repository.h"
+#include "modules/player/application/player_service.h"
+#include "modules/player/infrastructure/redis_player_cache_repository.h"
+#include "modules/login/infrastructure/mysql_account_repository.h"
+#include "modules/login/application/login_service.h"
+#include "runtime/session/redis_session_store.h"
 
 #include <cstdint>
 #include <sstream>
@@ -33,6 +34,9 @@ struct DemoOptions {
     bool reset_demo_state = true;
     bool run_negative_cases = true;
 };
+
+void EmitToolLog(common::log::LogLevel level, const framework::observability::LogEntry& entry);
+framework::observability::LogEntry NewToolEvent(std::string_view event);
 
 DemoOptions ParseOptions(int argc, char* argv[]) {
     DemoOptions options;
@@ -64,7 +68,10 @@ bool LoadConfig(const std::string& path, common::config::SimpleConfig& config) {
         return true;
     }
 
-    common::log::Logger::Instance().Log(common::log::LogLevel::kError, "failed to load config file: " + path);
+    auto entry = NewToolEvent("demo_flow_config_load_failed");
+    entry.Add("config_path", path);
+    entry.Add("message", "failed to load config file");
+    EmitToolLog(common::log::LogLevel::kError, entry);
     return false;
 }
 
@@ -75,6 +82,16 @@ std::string FormatError(common::error::ErrorCode code, const std::string& messag
         output << ", message=" << message;
     }
     return output.str();
+}
+
+void EmitToolLog(common::log::LogLevel level, const framework::observability::LogEntry& entry) {
+    common::log::Logger::Instance().Log(level, entry.Build());
+}
+
+framework::observability::LogEntry NewToolEvent(std::string_view event) {
+    framework::observability::LogEntry entry;
+    entry.Add("event", event);
+    return entry;
 }
 
 void ResetDemoState(common::mysql::MySqlClient& mysql_client,
@@ -105,7 +122,11 @@ void ResetDemoState(common::mysql::MySqlClient& mysql_client,
     redis_client.Del("player:snapshot:" + std::to_string(player_id));
     redis_client.Del("player:lock:" + std::to_string(player_id));
 
-    common::log::Logger::Instance().Log(common::log::LogLevel::kInfo, "demo state reset complete");
+    auto entry = NewToolEvent("demo_flow_state_reset_completed");
+    entry.Add("account_id", account_id);
+    entry.Add("player_id", player_id);
+    entry.Add("dungeon_id", static_cast<std::int64_t>(dungeon_id));
+    EmitToolLog(common::log::LogLevel::kInfo, entry);
 }
 
 bool Require(bool condition, const std::string& message) {
@@ -113,7 +134,9 @@ bool Require(bool condition, const std::string& message) {
         return true;
     }
 
-    common::log::Logger::Instance().Log(common::log::LogLevel::kError, message);
+    auto entry = NewToolEvent("demo_flow_assertion_failed");
+    entry.Add("message", message);
+    EmitToolLog(common::log::LogLevel::kError, entry);
     return false;
 }
 
@@ -128,7 +151,9 @@ void LogRewards(const std::vector<common::model::Reward>& rewards) {
         output << reward.reward_type << ':' << reward.amount;
         first = false;
     }
-    common::log::Logger::Instance().Log(common::log::LogLevel::kInfo, output.str());
+    auto entry = NewToolEvent("demo_flow_rewards_observed");
+    entry.Add("rewards", output.str().substr(std::string("rewards=").size()));
+    EmitToolLog(common::log::LogLevel::kInfo, entry);
 }
 
 }  // namespace
@@ -150,25 +175,37 @@ int main(int argc, char* argv[]) {
     common::mysql::MySqlClient mysql_client(common::mysql::ReadConnectionOptions(player_config));
     std::string error_message;
     if (!mysql_client.Connect(&error_message)) {
-        common::log::Logger::Instance().Log(common::log::LogLevel::kError, "mysql connect failed: " + error_message);
+        auto entry = NewToolEvent("demo_flow_dependency_connect_failed");
+        entry.Add("dependency", "mysql");
+        entry.Add("message", error_message);
+        EmitToolLog(common::log::LogLevel::kError, entry);
         return 1;
     }
 
     common::redis::RedisClient redis_client(common::redis::ReadConnectionOptions(player_config));
     if (!redis_client.Connect(&error_message)) {
-        common::log::Logger::Instance().Log(common::log::LogLevel::kError, "redis connect failed: " + error_message);
+        auto entry = NewToolEvent("demo_flow_dependency_connect_failed");
+        entry.Add("dependency", "redis");
+        entry.Add("message", error_message);
+        EmitToolLog(common::log::LogLevel::kError, entry);
         return 1;
     }
 
     common::mysql::MySqlClientPool mysql_pool(common::mysql::ReadConnectionOptions(player_config), 1);
     if (!mysql_pool.Initialize(&error_message)) {
-        common::log::Logger::Instance().Log(common::log::LogLevel::kError, "mysql pool init failed: " + error_message);
+        auto entry = NewToolEvent("demo_flow_dependency_pool_init_failed");
+        entry.Add("dependency", "mysql");
+        entry.Add("message", error_message);
+        EmitToolLog(common::log::LogLevel::kError, entry);
         return 1;
     }
 
     common::redis::RedisClientPool redis_pool(common::redis::ReadConnectionOptions(player_config), 1);
     if (!redis_pool.Initialize(&error_message)) {
-        common::log::Logger::Instance().Log(common::log::LogLevel::kError, "redis pool init failed: " + error_message);
+        auto entry = NewToolEvent("demo_flow_dependency_pool_init_failed");
+        entry.Add("dependency", "redis");
+        entry.Add("message", error_message);
+        EmitToolLog(common::log::LogLevel::kError, entry);
         return 1;
     }
 
@@ -183,7 +220,7 @@ int main(int argc, char* argv[]) {
             mysql_client, redis_client, player_config, dungeon_config, demo_account->account_id, demo_account->default_player_id);
     }
 
-    auto session_repository = login_server::session::RedisSessionRepository::FromConfig(redis_pool, login_config);
+    auto session_repository = common::session::RedisSessionStore::FromConfig(redis_pool, login_config);
     login_server::LoginService login_service(account_repository, session_repository);
 
     game_server::player::MySqlPlayerRepository player_repository(mysql_pool);
@@ -208,12 +245,12 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    std::ostringstream login_summary;
-    login_summary << "login success"
-                  << ", session_id=" << login_response.session.session_id
-                  << ", account_id=" << login_response.session.account_id
-                  << ", player_id=" << login_response.default_player_id;
-    common::log::Logger::Instance().Log(common::log::LogLevel::kInfo, login_summary.str());
+    auto login_entry = NewToolEvent("demo_flow_login_succeeded");
+    login_entry.Add("account_name", options.account_name);
+    login_entry.Add("auth_token", framework::observability::MaskAuthToken(login_response.session.session_id));
+    login_entry.Add("account_id", login_response.session.account_id);
+    login_entry.Add("player_id", login_response.default_player_id);
+    EmitToolLog(common::log::LogLevel::kInfo, login_entry);
 
     auto player_response = player_service.LoadPlayer(login_response.session.session_id, login_response.default_player_id);
     if (!Require(player_response.success,
@@ -221,15 +258,14 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    std::ostringstream player_summary;
-    player_summary << "load player success"
-                   << ", cache=" << (player_response.loaded_from_cache ? "hit" : "miss")
-                   << ", player_id=" << player_response.player_state.profile.player_id
-                   << ", level=" << player_response.player_state.profile.level
-                   << ", stamina=" << player_response.player_state.profile.stamina
-                   << ", gold=" << player_response.player_state.profile.gold
-                   << ", diamond=" << player_response.player_state.profile.diamond;
-    common::log::Logger::Instance().Log(common::log::LogLevel::kInfo, player_summary.str());
+    auto player_entry = NewToolEvent("demo_flow_load_player_succeeded");
+    player_entry.Add("cache", player_response.loaded_from_cache ? "hit" : "miss");
+    player_entry.Add("player_id", player_response.player_state.profile.player_id);
+    player_entry.Add("level", player_response.player_state.profile.level);
+    player_entry.Add("stamina", player_response.player_state.profile.stamina);
+    player_entry.Add("gold", player_response.player_state.profile.gold);
+    player_entry.Add("diamond", player_response.player_state.profile.diamond);
+    EmitToolLog(common::log::LogLevel::kInfo, player_entry);
 
     player_response = player_service.LoadPlayer(login_response.session.session_id, login_response.default_player_id);
     if (!Require(player_response.success && player_response.loaded_from_cache,
@@ -246,11 +282,12 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    std::ostringstream enter_summary;
-    enter_summary << "enter dungeon success"
-                  << ", battle_id=" << enter_response.battle_id
-                  << ", remain_stamina=" << enter_response.remain_stamina;
-    common::log::Logger::Instance().Log(common::log::LogLevel::kInfo, enter_summary.str());
+    auto enter_entry = NewToolEvent("demo_flow_enter_dungeon_succeeded");
+    enter_entry.Add("player_id", login_response.default_player_id);
+    enter_entry.Add("dungeon_id", static_cast<std::int64_t>(dungeon_id));
+    enter_entry.Add("battle_id", enter_response.battle_id);
+    enter_entry.Add("remain_stamina", enter_response.remain_stamina);
+    EmitToolLog(common::log::LogLevel::kInfo, enter_entry);
 
     const auto settle_response =
         dungeon_service.SettleDungeon({login_response.session.session_id,
@@ -264,9 +301,12 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    common::log::Logger::Instance().Log(common::log::LogLevel::kInfo,
-                                        "settle dungeon success, first_clear=" +
-                                            std::string(settle_response.first_clear ? "true" : "false"));
+    auto settle_entry = NewToolEvent("demo_flow_settle_dungeon_succeeded");
+    settle_entry.Add("player_id", login_response.default_player_id);
+    settle_entry.Add("dungeon_id", static_cast<std::int64_t>(dungeon_id));
+    settle_entry.Add("battle_id", enter_response.battle_id);
+    settle_entry.Add("first_clear", settle_response.first_clear ? "true" : "false");
+    EmitToolLog(common::log::LogLevel::kInfo, settle_entry);
     LogRewards(settle_response.rewards);
 
     const auto refreshed_player = player_service.LoadPlayer(login_response.session.session_id, login_response.default_player_id);
@@ -276,13 +316,14 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    std::ostringstream refreshed_summary;
-    refreshed_summary << "reload player success"
-                      << ", stamina=" << refreshed_player.player_state.profile.stamina
-                      << ", gold=" << refreshed_player.player_state.profile.gold
-                      << ", diamond=" << refreshed_player.player_state.profile.diamond
-                      << ", dungeon_progress_count=" << refreshed_player.player_state.dungeon_progress.size();
-    common::log::Logger::Instance().Log(common::log::LogLevel::kInfo, refreshed_summary.str());
+    auto refreshed_entry = NewToolEvent("demo_flow_reload_player_succeeded");
+    refreshed_entry.Add("player_id", login_response.default_player_id);
+    refreshed_entry.Add("stamina", refreshed_player.player_state.profile.stamina);
+    refreshed_entry.Add("gold", refreshed_player.player_state.profile.gold);
+    refreshed_entry.Add("diamond", refreshed_player.player_state.profile.diamond);
+    refreshed_entry.Add("dungeon_progress_count",
+                        static_cast<std::int64_t>(refreshed_player.player_state.dungeon_progress.size()));
+    EmitToolLog(common::log::LogLevel::kInfo, refreshed_entry);
 
     if (options.run_negative_cases) {
         const auto wrong_password = login_service.Login({options.account_name, "bad-password"});
@@ -333,6 +374,8 @@ int main(int argc, char* argv[]) {
         }
     }
 
-    common::log::Logger::Instance().Log(common::log::LogLevel::kInfo, "demo flow completed successfully");
+    auto done_entry = NewToolEvent("demo_flow_completed");
+    done_entry.Add("account_name", options.account_name);
+    EmitToolLog(common::log::LogLevel::kInfo, done_entry);
     return 0;
 }

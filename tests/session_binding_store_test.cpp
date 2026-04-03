@@ -1,5 +1,5 @@
-#include "login_server/session/in_memory_session_repository.h"
-#include "services/gateway/session_binding_store.h"
+#include "runtime/session/in_memory_session_store.h"
+#include "apps/gateway/session_binding_service.h"
 
 #include <iostream>
 
@@ -17,15 +17,15 @@ bool Expect(bool condition, const std::string& message) {
 }  // namespace
 
 int main() {
-    login_server::session::InMemorySessionRepository session_repository;
+    common::session::InMemorySessionStore session_repository;
     const auto session = session_repository.Create(10001, 20001);
-    services::gateway::SessionBindingStore store(session_repository);
+    services::gateway::SessionBindingService store(session_repository);
 
     common::net::RequestContext context;
-    context.session_id = session.session_id;
+    context.auth_token = session.session_id;
 
     const auto restored = store.ValidateOrRestore(1, &context);
-    if (!Expect(restored.status == services::gateway::SessionBindingStore::Status::kRestored,
+    if (!Expect(restored.status == services::gateway::SessionBindingService::Status::kRestored,
                 "expected first request to restore binding from session")) {
         return 1;
     }
@@ -33,11 +33,15 @@ int main() {
                 "expected restore to backfill player_id into request context")) {
         return 1;
     }
+    if (!Expect(context.account_id == session.account_id,
+                "expected restore to backfill account_id into request context")) {
+        return 1;
+    }
 
     common::net::RequestContext rebound_context;
-    rebound_context.session_id = session.session_id;
+    rebound_context.auth_token = session.session_id;
     const auto rebound = store.ValidateOrRestore(1, &rebound_context);
-    if (!Expect(rebound.status == services::gateway::SessionBindingStore::Status::kBound,
+    if (!Expect(rebound.status == services::gateway::SessionBindingService::Status::kBound,
                 "expected second request to use local binding")) {
         return 1;
     }
@@ -49,17 +53,17 @@ int main() {
     common::net::RequestContext invalid_context = context;
     invalid_context.player_id = 99999;
     const auto invalid = store.ValidateOrRestore(1, &invalid_context);
-    if (!Expect(invalid.status == services::gateway::SessionBindingStore::Status::kInvalid,
+    if (!Expect(invalid.status == services::gateway::SessionBindingService::Status::kInvalid,
                 "expected mismatched binding to fail")) {
         return 1;
     }
 
     store.Unbind(1);
     common::net::RequestContext missing_context;
-    missing_context.session_id = "missing";
+    missing_context.auth_token = "missing";
     missing_context.player_id = 20001;
     const auto missing_session = store.ValidateOrRestore(2, &missing_context);
-    if (!Expect(missing_session.status == services::gateway::SessionBindingStore::Status::kInvalid,
+    if (!Expect(missing_session.status == services::gateway::SessionBindingService::Status::kInvalid,
                 "expected missing session to fail restore")) {
         return 1;
     }
