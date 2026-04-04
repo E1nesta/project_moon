@@ -2,14 +2,14 @@
 #include "runtime/foundation/error/error_code.h"
 #include "runtime/foundation/log/logger.h"
 #include "runtime/observability/structured_log.h"
-#include "runtime/storage/mysql/mysql_client.h"
 #include "runtime/protocol/message_id.h"
 #include "runtime/protocol/proto_codec.h"
 #include "runtime/protocol/proto_mapper.h"
+#include "runtime/storage/mysql/mysql_client.h"
 #include "runtime/storage/redis/redis_client.h"
-#include "runtime/transport/transport_client.h"
 #include "runtime/transport/tls_options.h"
-#include "modules/login/infrastructure/mysql_account_repository.h"
+#include "runtime/transport/transport_client.h"
+#include "tools/demo_support.h"
 
 #include "game_backend.pb.h"
 
@@ -19,7 +19,6 @@
 #include <sstream>
 #include <string>
 #include <string_view>
-#include <vector>
 
 namespace {
 
@@ -54,8 +53,15 @@ struct CallResult {
     common::net::Packet packet;
 };
 
-void EmitToolLog(common::log::LogLevel level, const framework::observability::LogEntry& entry);
-framework::observability::LogEntry NewToolEvent(std::string_view event);
+void EmitToolLog(common::log::LogLevel level, const framework::observability::LogEntry& entry) {
+    common::log::Logger::Instance().Log(level, entry.Build());
+}
+
+framework::observability::LogEntry NewToolEvent(std::string_view event) {
+    framework::observability::LogEntry entry;
+    entry.Add("event", event);
+    return entry;
+}
 
 std::optional<common::error::ErrorCode> ParseErrorCode(std::string_view value) {
     using common::error::ErrorCode;
@@ -98,9 +104,6 @@ std::optional<common::error::ErrorCode> ParseErrorCode(std::string_view value) {
     }
     if (value == "BATTLE_ALREADY_SETTLED") {
         return ErrorCode::kBattleAlreadySettled;
-    }
-    if (value == "INVALID_DUNGEON_ID") {
-        return ErrorCode::kInvalidDungeonId;
     }
     if (value == "INVALID_STAR") {
         return ErrorCode::kInvalidStar;
@@ -153,12 +156,6 @@ DemoOptions ParseOptions(int argc, char* argv[]) {
                 options.login_config = "configs/delivery/login_server.conf";
                 options.player_config = "configs/delivery/player_server.conf";
                 options.dungeon_config = "configs/delivery/dungeon_server.conf";
-            } else {
-                options.config_profile = "local";
-                options.gateway_config = "configs/local/gateway_server.conf";
-                options.login_config = "configs/local/login_server.conf";
-                options.player_config = "configs/local/player_server.conf";
-                options.dungeon_config = "configs/local/dungeon_server.conf";
             }
         } else if (arg == "--gateway-config" && index + 1 < argc) {
             options.gateway_config = argv[++index];
@@ -227,16 +224,6 @@ std::string FormatError(common::error::ErrorCode code, const std::string& messag
     return output.str();
 }
 
-void EmitToolLog(common::log::LogLevel level, const framework::observability::LogEntry& entry) {
-    common::log::Logger::Instance().Log(level, entry.Build());
-}
-
-framework::observability::LogEntry NewToolEvent(std::string_view event) {
-    framework::observability::LogEntry entry;
-    entry.Add("event", event);
-    return entry;
-}
-
 bool Require(bool condition, const std::string& message) {
     if (condition) {
         return true;
@@ -278,7 +265,6 @@ bool RequireExpectedError(const CallResult& result,
 
 void LogRewards(const google::protobuf::RepeatedPtrField<game_backend::proto::Reward>& rewards) {
     std::ostringstream output;
-    output << "rewards=";
     bool first = true;
     for (const auto& reward : rewards) {
         if (!first) {
@@ -288,7 +274,7 @@ void LogRewards(const google::protobuf::RepeatedPtrField<game_backend::proto::Re
         first = false;
     }
     auto entry = NewToolEvent("demo_client_rewards_observed");
-    entry.Add("rewards", output.str().substr(std::string("rewards=").size()));
+    entry.Add("rewards", output.str());
     EmitToolLog(common::log::LogLevel::kInfo, entry);
 }
 
@@ -303,39 +289,30 @@ common::net::RequestContext BuildContext(std::uint64_t request_id,
     return context;
 }
 
-void ResetDemoState(common::mysql::MySqlClient& mysql_client,
-                    common::redis::RedisClient& redis_client,
-                    const common::config::SimpleConfig& player_config,
-                    const common::config::SimpleConfig& dungeon_config,
-                    std::int64_t account_id,
-                    std::int64_t player_id) {
-    const auto dungeon_id = dungeon_config.GetInt("demo.dungeon_id", 1001);
-
-    mysql_client.Execute("DELETE FROM reward_log WHERE player_id = " + std::to_string(player_id));
-    mysql_client.Execute("DELETE FROM dungeon_battle WHERE player_id = " + std::to_string(player_id));
-    mysql_client.Execute("DELETE FROM player_dungeon WHERE player_id = " + std::to_string(player_id) +
-                         " AND dungeon_id = " + std::to_string(dungeon_id));
-
-    std::ostringstream asset_sql;
-    asset_sql << "UPDATE player_asset SET stamina = " << player_config.GetInt("demo.stamina", 120)
-              << ", gold = " << player_config.GetInt("demo.gold", 1000)
-              << ", diamond = " << player_config.GetInt("demo.diamond", 100)
-              << " WHERE player_id = " << player_id;
-    mysql_client.Execute(asset_sql.str());
-
-    const auto active_session_key = "account:session:" + std::to_string(account_id);
-    if (const auto active_session = redis_client.Get(active_session_key); active_session.has_value()) {
-        redis_client.Del("session:" + *active_session);
+bool ConnectMySql(const char* dependency, common::mysql::MySqlClient& client) {
+    std::string error_message;
+    if (client.Connect(&error_message)) {
+        return true;
     }
-    redis_client.Del(active_session_key);
-    redis_client.Del("player:snapshot:" + std::to_string(player_id));
-    redis_client.Del("player:lock:" + std::to_string(player_id));
 
-    auto entry = NewToolEvent("demo_client_state_reset_completed");
-    entry.Add("account_id", account_id);
-    entry.Add("player_id", player_id);
-    entry.Add("dungeon_id", static_cast<std::int64_t>(dungeon_id));
-    EmitToolLog(common::log::LogLevel::kInfo, entry);
+    auto entry = NewToolEvent("demo_client_dependency_connect_failed");
+    entry.Add("dependency", dependency);
+    entry.Add("message", error_message);
+    EmitToolLog(common::log::LogLevel::kError, entry);
+    return false;
+}
+
+bool ConnectRedis(const char* dependency, common::redis::RedisClient& client) {
+    std::string error_message;
+    if (client.Connect(&error_message)) {
+        return true;
+    }
+
+    auto entry = NewToolEvent("demo_client_dependency_connect_failed");
+    entry.Add("dependency", dependency);
+    entry.Add("message", error_message);
+    EmitToolLog(common::log::LogLevel::kError, entry);
+    return false;
 }
 
 template <typename RequestT>
@@ -349,7 +326,6 @@ CallResult SendMessage(framework::transport::TransportClient& client,
     CallResult result;
     std::string error_message;
     if (!client.SendAndReceive(packet, &result.packet, &error_message)) {
-        result.ok = false;
         result.error_code = error_message == "timeout" ? common::error::ErrorCode::kUpstreamTimeout
                                                         : common::error::ErrorCode::kServiceUnavailable;
         result.error_message = error_message;
@@ -358,7 +334,6 @@ CallResult SendMessage(framework::transport::TransportClient& client,
 
     const auto maybe_response_id = common::net::MessageIdFromInt(result.packet.header.msg_id);
     if (!maybe_response_id.has_value()) {
-        result.ok = false;
         result.error_code = common::error::ErrorCode::kBadGateway;
         result.error_message = "unknown response message id";
         return result;
@@ -367,13 +342,11 @@ CallResult SendMessage(framework::transport::TransportClient& client,
     if (*maybe_response_id == common::net::MessageId::kErrorResponse) {
         game_backend::proto::ErrorResponse error_response;
         if (!common::net::ParseMessage(result.packet.body, &error_response)) {
-            result.ok = false;
             result.error_code = common::error::ErrorCode::kBadGateway;
             result.error_message = "failed to parse error response";
             return result;
         }
 
-        result.ok = false;
         result.error_code = static_cast<common::error::ErrorCode>(error_response.error_code());
         result.error_message = error_response.error_message();
         return result;
@@ -401,33 +374,32 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
+    const auto demo_data = demo::support::ReadDemoDataConfig(login_config, player_config, dungeon_config);
     if (options.reset_demo_state) {
-        common::mysql::MySqlClient mysql_client(common::mysql::ReadConnectionOptions(player_config));
-        common::redis::RedisClient redis_client(common::redis::ReadConnectionOptions(player_config));
+        common::mysql::MySqlClient account_mysql(common::mysql::ReadConnectionOptions(login_config, "storage.account.mysql."));
+        common::mysql::MySqlClient player_mysql(common::mysql::ReadConnectionOptions(player_config, "storage.player.mysql."));
+        common::mysql::MySqlClient battle_mysql(common::mysql::ReadConnectionOptions(dungeon_config, "storage.battle.mysql."));
+        common::redis::RedisClient account_redis(common::redis::ReadConnectionOptions(login_config, "storage.account.redis."));
+        common::redis::RedisClient player_redis(common::redis::ReadConnectionOptions(player_config, "storage.player.redis."));
+        common::redis::RedisClient battle_redis(common::redis::ReadConnectionOptions(dungeon_config, "storage.battle.redis."));
+        if (!ConnectMySql("account_mysql", account_mysql) ||
+            !ConnectMySql("player_mysql", player_mysql) ||
+            !ConnectMySql("battle_mysql", battle_mysql) ||
+            !ConnectRedis("account_redis", account_redis) ||
+            !ConnectRedis("player_redis", player_redis) ||
+            !ConnectRedis("battle_redis", battle_redis)) {
+            return 1;
+        }
+
         std::string error_message;
-        if (!mysql_client.Connect(&error_message)) {
-            auto entry = NewToolEvent("demo_client_dependency_connect_failed");
-            entry.Add("dependency", "mysql");
+        if (!demo::support::EnsureDemoData(account_mysql, player_mysql, demo_data, &error_message) ||
+            !demo::support::ResetDemoState(
+                player_mysql, battle_mysql, account_redis, player_redis, battle_redis, demo_data, &error_message)) {
+            auto entry = NewToolEvent("demo_client_state_prepare_failed");
             entry.Add("message", error_message);
             EmitToolLog(common::log::LogLevel::kError, entry);
             return 1;
         }
-        if (!redis_client.Connect(&error_message)) {
-            auto entry = NewToolEvent("demo_client_dependency_connect_failed");
-            entry.Add("dependency", "redis");
-            entry.Add("message", error_message);
-            EmitToolLog(common::log::LogLevel::kError, entry);
-            return 1;
-        }
-
-        login_server::auth::MySqlAccountRepository account_repository(mysql_client);
-        const auto demo_account = account_repository.FindByName(options.account_name);
-        if (!Require(demo_account.has_value(), "demo account not found in mysql")) {
-            return 1;
-        }
-
-        ResetDemoState(
-            mysql_client, redis_client, player_config, dungeon_config, demo_account->account_id, demo_account->default_player_id);
     }
 
     const auto gateway_host = gateway_config.GetString("client.host", "127.0.0.1");
@@ -445,10 +417,8 @@ int main(int argc, char* argv[]) {
     std::uint64_t request_id = 1;
 
     if (options.scenario == DemoScenario::kLoadOnly) {
-        if (!Require(!options.session_id.empty(), "load-only scenario requires --session-id")) {
-            return 1;
-        }
-        if (!Require(options.player_id != 0, "load-only scenario requires --player-id")) {
+        if (!Require(!options.session_id.empty(), "load-only scenario requires --session-id") ||
+            !Require(options.player_id != 0, "load-only scenario requires --player-id")) {
             return 1;
         }
 
@@ -490,6 +460,7 @@ int main(int argc, char* argv[]) {
     if (!Require(common::net::ParseMessage(login_call.packet.body, &login_response), "failed to parse login response")) {
         return 1;
     }
+
     auto login_entry = NewToolEvent("demo_client_login_succeeded");
     login_entry.Add("account_name", options.account_name);
     login_entry.Add("auth_token", framework::observability::MaskAuthToken(login_response.auth_token()));
@@ -522,6 +493,7 @@ int main(int argc, char* argv[]) {
                      "failed to parse session recovery load response")) {
             return 1;
         }
+
         auto recovery_entry = NewToolEvent("demo_client_session_recovery_succeeded");
         recovery_entry.Add("player_id", recovery_response.player_state().profile().player_id());
         recovery_entry.Add("cache", recovery_response.loaded_from_cache() ? "hit" : "miss");
@@ -543,11 +515,13 @@ int main(int argc, char* argv[]) {
     if (!Require(common::net::ParseMessage(load_call.packet.body, &load_response), "failed to parse load player response")) {
         return 1;
     }
+
+    const auto initial_stamina = load_response.player_state().profile().stamina();
     auto player_entry = NewToolEvent("demo_client_load_player_succeeded");
     player_entry.Add("cache", load_response.loaded_from_cache() ? "hit" : "miss");
     player_entry.Add("player_id", load_response.player_state().profile().player_id());
     player_entry.Add("level", static_cast<std::int64_t>(load_response.player_state().profile().level()));
-    player_entry.Add("stamina", static_cast<std::int64_t>(load_response.player_state().profile().stamina()));
+    player_entry.Add("stamina", static_cast<std::int64_t>(initial_stamina));
     player_entry.Add("gold", load_response.player_state().profile().gold());
     player_entry.Add("diamond", load_response.player_state().profile().diamond());
     EmitToolLog(common::log::LogLevel::kInfo, player_entry);
@@ -558,170 +532,208 @@ int main(int argc, char* argv[]) {
                                               common::net::MessageId::kLoadPlayerRequest,
                                               BuildContext(request_id++, login_response.auth_token(), login_response.player_id()),
                                               &second_load_request);
-    if (!Require(second_load_call.ok, "second load failed: " + FormatError(second_load_call.error_code, second_load_call.error_message))) {
+    if (!Require(second_load_call.ok,
+                 "second load failed: " + FormatError(second_load_call.error_code, second_load_call.error_message))) {
         return 1;
     }
 
     game_backend::proto::LoadPlayerResponse second_load_response;
     if (!Require(common::net::ParseMessage(second_load_call.packet.body, &second_load_response),
-                 "failed to parse second load player response")) {
-        return 1;
-    }
-    if (!Require(second_load_response.loaded_from_cache(),
-                 "second load should hit cache")) {
+                 "failed to parse second load response") ||
+        !Require(second_load_response.loaded_from_cache(), "second load should hit cache")) {
         return 1;
     }
 
-    const auto dungeon_id = dungeon_config.GetInt("demo.dungeon_id", 1001);
-    game_backend::proto::EnterDungeonRequest enter_request;
+    game_backend::proto::EnterBattleRequest enter_request;
     enter_request.set_player_id(login_response.player_id());
-    enter_request.set_dungeon_id(dungeon_id);
+    enter_request.set_stage_id(demo_data.stage_id);
+    enter_request.set_mode("pve");
     const auto enter_call = SendMessage(*active_client,
-                                        common::net::MessageId::kEnterDungeonRequest,
+                                        common::net::MessageId::kEnterBattleRequest,
                                         BuildContext(request_id++, login_response.auth_token(), login_response.player_id()),
                                         &enter_request);
     if (options.expected_enter_error.has_value()) {
-        return RequireExpectedError(enter_call, *options.expected_enter_error, "enter dungeon request") ? 0 : 1;
+        return RequireExpectedError(enter_call, *options.expected_enter_error, "enter battle request") ? 0 : 1;
     }
-    if (!Require(enter_call.ok, "enter dungeon failed: " + FormatError(enter_call.error_code, enter_call.error_message))) {
+    if (!Require(enter_call.ok, "enter battle failed: " + FormatError(enter_call.error_code, enter_call.error_message))) {
         return 1;
     }
 
-    game_backend::proto::EnterDungeonResponse enter_response;
-    if (!Require(common::net::ParseMessage(enter_call.packet.body, &enter_response), "failed to parse enter dungeon response")) {
+    game_backend::proto::EnterBattleResponse enter_response;
+    if (!Require(common::net::ParseMessage(enter_call.packet.body, &enter_response), "failed to parse enter battle response")) {
         return 1;
     }
-    auto enter_entry = NewToolEvent("demo_client_enter_dungeon_succeeded");
+
+    auto enter_entry = NewToolEvent("demo_client_enter_battle_succeeded");
     enter_entry.Add("player_id", login_response.player_id());
-    enter_entry.Add("dungeon_id", static_cast<std::int64_t>(dungeon_id));
-    enter_entry.Add("battle_id", enter_response.battle_id());
+    enter_entry.Add("stage_id", static_cast<std::int64_t>(demo_data.stage_id));
+    enter_entry.Add("session_id", enter_response.session_id());
     enter_entry.Add("remain_stamina", static_cast<std::int64_t>(enter_response.remain_stamina()));
     EmitToolLog(common::log::LogLevel::kInfo, enter_entry);
 
-    game_backend::proto::SettleDungeonRequest settle_request;
+    game_backend::proto::SettleBattleRequest settle_request;
     settle_request.set_player_id(login_response.player_id());
-    settle_request.set_battle_id(enter_response.battle_id());
-    settle_request.set_dungeon_id(dungeon_id);
+    settle_request.set_session_id(enter_response.session_id());
+    settle_request.set_stage_id(demo_data.stage_id);
     settle_request.set_star(3);
-    settle_request.set_result(true);
+    settle_request.set_result_code(1);
+    settle_request.set_client_score(123456);
     const auto settle_call = SendMessage(*active_client,
-                                         common::net::MessageId::kSettleDungeonRequest,
+                                         common::net::MessageId::kSettleBattleRequest,
                                          BuildContext(request_id++, login_response.auth_token(), login_response.player_id()),
                                          &settle_request);
-    if (!Require(settle_call.ok, "settle dungeon failed: " + FormatError(settle_call.error_code, settle_call.error_message))) {
+    if (!Require(settle_call.ok, "settle battle failed: " + FormatError(settle_call.error_code, settle_call.error_message))) {
         return 1;
     }
 
-    game_backend::proto::SettleDungeonResponse settle_response;
+    game_backend::proto::SettleBattleResponse settle_response;
     if (!Require(common::net::ParseMessage(settle_call.packet.body, &settle_response), "failed to parse settle response")) {
         return 1;
     }
-    auto settle_entry = NewToolEvent("demo_client_settle_dungeon_succeeded");
+
+    auto settle_entry = NewToolEvent("demo_client_settle_battle_succeeded");
     settle_entry.Add("player_id", login_response.player_id());
-    settle_entry.Add("dungeon_id", static_cast<std::int64_t>(dungeon_id));
-    settle_entry.Add("battle_id", enter_response.battle_id());
-    settle_entry.Add("first_clear", settle_response.first_clear() ? "true" : "false");
+    settle_entry.Add("stage_id", static_cast<std::int64_t>(demo_data.stage_id));
+    settle_entry.Add("session_id", enter_response.session_id());
+    settle_entry.Add("reward_grant_id", settle_response.reward_grant_id());
+    settle_entry.Add("grant_status", static_cast<std::int64_t>(settle_response.grant_status()));
     EmitToolLog(common::log::LogLevel::kInfo, settle_entry);
-    LogRewards(settle_response.rewards());
+    LogRewards(settle_response.reward_preview());
 
-    game_backend::proto::LoadPlayerRequest refresh_request;
-    refresh_request.set_player_id(login_response.player_id());
-    const auto refresh_call = SendMessage(*active_client,
-                                          common::net::MessageId::kLoadPlayerRequest,
-                                          BuildContext(request_id++, login_response.auth_token(), login_response.player_id()),
-                                          &refresh_request);
-    if (!Require(refresh_call.ok, "reload player failed: " + FormatError(refresh_call.error_code, refresh_call.error_message))) {
+    game_backend::proto::GetRewardGrantStatusRequest grant_request;
+    grant_request.set_player_id(login_response.player_id());
+    grant_request.set_reward_grant_id(settle_response.reward_grant_id());
+    const auto grant_call = SendMessage(*active_client,
+                                        common::net::MessageId::kGetRewardGrantStatusRequest,
+                                        BuildContext(request_id++, login_response.auth_token(), login_response.player_id()),
+                                        &grant_request);
+    if (!Require(grant_call.ok, "get reward grant status failed: " +
+                                    FormatError(grant_call.error_code, grant_call.error_message))) {
         return 1;
     }
 
-    game_backend::proto::LoadPlayerResponse refresh_response;
-    if (!Require(common::net::ParseMessage(refresh_call.packet.body, &refresh_response), "failed to parse reload response")) {
+    game_backend::proto::GetRewardGrantStatusResponse grant_response;
+    if (!Require(common::net::ParseMessage(grant_call.packet.body, &grant_response),
+                 "failed to parse reward grant status response") ||
+        !Require(grant_response.grant_status() == 1, "reward grant should be completed synchronously")) {
         return 1;
     }
-    auto refresh_entry = NewToolEvent("demo_client_reload_player_succeeded");
-    refresh_entry.Add("player_id", login_response.player_id());
-    refresh_entry.Add("stamina", static_cast<std::int64_t>(refresh_response.player_state().profile().stamina()));
-    refresh_entry.Add("gold", refresh_response.player_state().profile().gold());
-    refresh_entry.Add("diamond", refresh_response.player_state().profile().diamond());
-    refresh_entry.Add("dungeon_progress_count", static_cast<std::int64_t>(refresh_response.player_state().dungeon_progress_size()));
-    EmitToolLog(common::log::LogLevel::kInfo, refresh_entry);
+
+    auto grant_entry = NewToolEvent("demo_client_reward_grant_status_observed");
+    grant_entry.Add("reward_grant_id", grant_response.reward_grant_id());
+    grant_entry.Add("grant_status", static_cast<std::int64_t>(grant_response.grant_status()));
+    EmitToolLog(common::log::LogLevel::kInfo, grant_entry);
+
+    game_backend::proto::LoadPlayerRequest final_load_request;
+    final_load_request.set_player_id(login_response.player_id());
+    const auto final_load_call = SendMessage(*active_client,
+                                             common::net::MessageId::kLoadPlayerRequest,
+                                             BuildContext(request_id++, login_response.auth_token(), login_response.player_id()),
+                                             &final_load_request);
+    if (!Require(final_load_call.ok,
+                 "reload player failed: " + FormatError(final_load_call.error_code, final_load_call.error_message))) {
+        return 1;
+    }
+
+    game_backend::proto::LoadPlayerResponse final_load_response;
+    if (!Require(common::net::ParseMessage(final_load_call.packet.body, &final_load_response),
+                 "failed to parse reload player response") ||
+        !Require(final_load_response.player_state().profile().stamina() == enter_response.remain_stamina(),
+                 "reload player should reflect stamina consumption") ||
+        !Require(final_load_response.player_state().profile().gold() ==
+                     load_response.player_state().profile().gold() +
+                         dungeon_config.GetInt("demo.dungeon_normal_gold_reward", 100),
+                 "reload player should reflect gold reward") ||
+        !Require(final_load_response.player_state().profile().diamond() ==
+                     load_response.player_state().profile().diamond() +
+                         dungeon_config.GetInt("demo.dungeon_first_clear_diamond_reward", 50),
+                 "reload player should reflect diamond reward")) {
+        return 1;
+    }
+
+    auto reload_entry = NewToolEvent("demo_client_reload_player_succeeded");
+    reload_entry.Add("initial_stamina", static_cast<std::int64_t>(initial_stamina));
+    reload_entry.Add("current_stamina", static_cast<std::int64_t>(final_load_response.player_state().profile().stamina()));
+    reload_entry.Add("gold", final_load_response.player_state().profile().gold());
+    reload_entry.Add("diamond", final_load_response.player_state().profile().diamond());
+    EmitToolLog(common::log::LogLevel::kInfo, reload_entry);
 
     if (options.run_negative_cases) {
-        game_backend::proto::LoginRequest wrong_password_request;
-        wrong_password_request.set_account_name(options.account_name);
-        wrong_password_request.set_password("bad-password");
-        const auto wrong_password_call =
-            SendMessage(*active_client,
-                        common::net::MessageId::kLoginRequest,
-                        BuildContext(request_id++),
-                        &wrong_password_request);
-        if (!RequireExpectedError(
-                wrong_password_call, common::error::ErrorCode::kInvalidPassword, "wrong password request")) {
+        game_backend::proto::LoginRequest bad_login_request;
+        bad_login_request.set_account_name(options.account_name);
+        bad_login_request.set_password("bad-password");
+        const auto bad_login_call =
+            SendMessage(*active_client, common::net::MessageId::kLoginRequest, BuildContext(request_id++), &bad_login_request);
+        if (!RequireExpectedError(bad_login_call, common::error::ErrorCode::kInvalidPassword, "invalid password")) {
             return 1;
         }
 
-        game_backend::proto::LoadPlayerRequest invalid_session_request;
-        invalid_session_request.set_player_id(login_response.player_id());
-        const auto invalid_session_call = SendMessage(*active_client,
-                                                      common::net::MessageId::kLoadPlayerRequest,
-                                                      BuildContext(request_id++, "invalid-session", login_response.player_id()),
-                                                      &invalid_session_request);
-        if (!Require(!invalid_session_call.ok &&
-                         invalid_session_call.error_code == common::error::ErrorCode::kSessionInvalid,
-                     "invalid session should be rejected")) {
-            return 1;
-        }
-
-        game_backend::proto::SettleDungeonRequest duplicate_settle_request;
-        duplicate_settle_request.set_player_id(login_response.player_id());
-        duplicate_settle_request.set_battle_id(enter_response.battle_id());
-        duplicate_settle_request.set_dungeon_id(dungeon_id);
-        duplicate_settle_request.set_star(3);
-        duplicate_settle_request.set_result(true);
         const auto duplicate_settle_call = SendMessage(*active_client,
-                                                       common::net::MessageId::kSettleDungeonRequest,
+                                                       common::net::MessageId::kSettleBattleRequest,
                                                        BuildContext(request_id++, login_response.auth_token(), login_response.player_id()),
-                                                       &duplicate_settle_request);
-        if (!Require(duplicate_settle_call.ok, "duplicate settle request transport failed")) {
+                                                       &settle_request);
+        if (!Require(duplicate_settle_call.ok,
+                     "duplicate settle failed: " +
+                         FormatError(duplicate_settle_call.error_code, duplicate_settle_call.error_message))) {
             return 1;
         }
-        game_backend::proto::SettleDungeonResponse duplicate_settle_response;
+        game_backend::proto::SettleBattleResponse duplicate_settle_response;
         if (!Require(common::net::ParseMessage(duplicate_settle_call.packet.body, &duplicate_settle_response),
-                     "failed to parse duplicate settle response")) {
-            return 1;
-        }
-        if (!Require(duplicate_settle_response.first_clear() && duplicate_settle_response.rewards_size() == 2,
-                     "duplicate settle request should replay the original settlement response")) {
+                     "failed to parse duplicate settle response") ||
+            !Require(duplicate_settle_response.reward_grant_id() == settle_response.reward_grant_id(),
+                     "duplicate settle should replay the same reward grant")) {
             return 1;
         }
 
-        game_backend::proto::EnterDungeonRequest invalid_star_enter_request;
+        game_backend::proto::EnterBattleRequest invalid_star_enter_request;
         invalid_star_enter_request.set_player_id(login_response.player_id());
-        invalid_star_enter_request.set_dungeon_id(dungeon_id);
+        invalid_star_enter_request.set_stage_id(demo_data.stage_id);
+        invalid_star_enter_request.set_mode("pve");
         const auto invalid_star_enter_call = SendMessage(*active_client,
-                                                         common::net::MessageId::kEnterDungeonRequest,
+                                                         common::net::MessageId::kEnterBattleRequest,
                                                          BuildContext(request_id++, login_response.auth_token(), login_response.player_id()),
                                                          &invalid_star_enter_request);
-        if (!Require(invalid_star_enter_call.ok, "second enter for invalid-star case transport failed")) {
+        if (!Require(invalid_star_enter_call.ok,
+                     "second enter battle failed: " +
+                         FormatError(invalid_star_enter_call.error_code, invalid_star_enter_call.error_message))) {
             return 1;
         }
-        game_backend::proto::EnterDungeonResponse invalid_star_enter_response;
+
+        game_backend::proto::EnterBattleResponse invalid_star_enter_response;
         if (!Require(common::net::ParseMessage(invalid_star_enter_call.packet.body, &invalid_star_enter_response),
-                     "failed to parse invalid star enter response")) {
+                     "failed to parse second enter battle response")) {
             return 1;
         }
-        game_backend::proto::SettleDungeonRequest invalid_star_settle_request;
-        invalid_star_settle_request.set_player_id(login_response.player_id());
-        invalid_star_settle_request.set_battle_id(invalid_star_enter_response.battle_id());
-        invalid_star_settle_request.set_dungeon_id(dungeon_id);
-        invalid_star_settle_request.set_star(99);
-        invalid_star_settle_request.set_result(true);
-        const auto invalid_star_settle_call = SendMessage(*active_client,
-                                                          common::net::MessageId::kSettleDungeonRequest,
-                                                          BuildContext(request_id++, login_response.auth_token(), login_response.player_id()),
-                                                          &invalid_star_settle_request);
-        if (!RequireExpectedError(
-                invalid_star_settle_call, common::error::ErrorCode::kInvalidStar, "invalid star settle request")) {
+
+        game_backend::proto::SettleBattleRequest invalid_star_request;
+        invalid_star_request.set_player_id(login_response.player_id());
+        invalid_star_request.set_session_id(invalid_star_enter_response.session_id());
+        invalid_star_request.set_stage_id(demo_data.stage_id);
+        invalid_star_request.set_star(99);
+        invalid_star_request.set_result_code(1);
+        invalid_star_request.set_client_score(1);
+        const auto invalid_star_call = SendMessage(*active_client,
+                                                   common::net::MessageId::kSettleBattleRequest,
+                                                   BuildContext(request_id++, login_response.auth_token(), login_response.player_id()),
+                                                   &invalid_star_request);
+        if (!RequireExpectedError(invalid_star_call, common::error::ErrorCode::kInvalidStar, "invalid star")) {
+            return 1;
+        }
+
+        game_backend::proto::SettleBattleRequest cleanup_settle_request;
+        cleanup_settle_request.set_player_id(login_response.player_id());
+        cleanup_settle_request.set_session_id(invalid_star_enter_response.session_id());
+        cleanup_settle_request.set_stage_id(demo_data.stage_id);
+        cleanup_settle_request.set_star(1);
+        cleanup_settle_request.set_result_code(1);
+        cleanup_settle_request.set_client_score(654321);
+        const auto cleanup_settle_call = SendMessage(*active_client,
+                                                     common::net::MessageId::kSettleBattleRequest,
+                                                     BuildContext(request_id++, login_response.auth_token(), login_response.player_id()),
+                                                     &cleanup_settle_request);
+        if (!Require(cleanup_settle_call.ok,
+                     "cleanup settle failed: " +
+                         FormatError(cleanup_settle_call.error_code, cleanup_settle_call.error_message))) {
             return 1;
         }
     }

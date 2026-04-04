@@ -81,23 +81,12 @@ endfunction()
 
 generate_proto_sources("game_backend.proto" PROTO_SRCS PROTO_HDRS)
 generate_proto_sources("internal/player_internal.proto" INTERNAL_PROTO_SRCS INTERNAL_PROTO_HDRS)
-generate_proto_sources("apache/rocketmq/v2/definition.proto" ROCKETMQ_DEF_PROTO_SRCS ROCKETMQ_DEF_PROTO_HDRS)
-generate_proto_sources("apache/rocketmq/v2/service.proto" ROCKETMQ_SERVICE_PROTO_SRCS ROCKETMQ_SERVICE_PROTO_HDRS)
 generate_grpc_sources(
     "internal/player_internal.proto"
     INTERNAL_GRPC_SRCS
     INTERNAL_GRPC_HDRS
     "${INTERNAL_PROTO_SRCS}"
     "${INTERNAL_PROTO_HDRS}"
-)
-generate_grpc_sources(
-    "apache/rocketmq/v2/service.proto"
-    ROCKETMQ_SERVICE_GRPC_SRCS
-    ROCKETMQ_SERVICE_GRPC_HDRS
-    "${ROCKETMQ_SERVICE_PROTO_SRCS}"
-    "${ROCKETMQ_SERVICE_PROTO_HDRS}"
-    "${ROCKETMQ_DEF_PROTO_SRCS}"
-    "${ROCKETMQ_DEF_PROTO_HDRS}"
 )
 
 add_library(protocol STATIC
@@ -124,21 +113,6 @@ target_link_libraries(internal_protocol
         gRPC::grpc++
 )
 target_include_directories(internal_protocol
-    PUBLIC
-        ${CMAKE_CURRENT_BINARY_DIR}
-)
-
-add_library(rocketmq_protocol STATIC
-    ${ROCKETMQ_DEF_PROTO_SRCS}
-    ${ROCKETMQ_SERVICE_PROTO_SRCS}
-    ${ROCKETMQ_SERVICE_GRPC_SRCS}
-)
-target_link_libraries(rocketmq_protocol
-    PUBLIC
-        protobuf::libprotobuf
-        gRPC::grpc++
-)
-target_include_directories(rocketmq_protocol
     PUBLIC
         ${CMAKE_CURRENT_BINARY_DIR}
 )
@@ -183,7 +157,6 @@ target_compile_definitions(runtime_foundation PUBLIC MOBILE_GAME_BACKEND_VERSION
 
 add_library(runtime_storage STATIC
     runtime/storage/mysql/mysql_client.cpp
-    runtime/mq/rocketmq_client.cpp
     runtime/storage/mysql/mysql_client_pool.cpp
     runtime/storage/redis/redis_client.cpp
     runtime/storage/redis/redis_client_pool.cpp
@@ -192,9 +165,6 @@ set_backend_target_defaults(runtime_storage)
 target_link_libraries(runtime_storage
     PUBLIC
         runtime_foundation
-        rocketmq_protocol
-        protobuf::libprotobuf
-        gRPC::grpc++
         ${MYSQLCLIENT_LIBRARIES}
         ${HIREDIS_LIBRARIES}
 )
@@ -425,12 +395,6 @@ add_backend_executable(dungeon_server
 )
 target_link_libraries(dungeon_server PRIVATE dungeon_application dungeon_infrastructure runtime_core)
 
-add_backend_executable(battle_reward_worker
-    apps/battle_reward_worker/main.cpp
-    apps/battle_reward_worker/battle_reward_worker_app.cpp
-)
-target_link_libraries(battle_reward_worker PRIVATE dungeon_application dungeon_infrastructure runtime_core)
-
 add_executable(service_check
     tools/service_check/main.cpp
 )
@@ -445,12 +409,14 @@ target_link_libraries(password_tool PRIVATE runtime_core)
 
 add_executable(demo_client
     tools/demo_client/main.cpp
+    tools/demo_support.cpp
 )
 set_backend_target_defaults(demo_client)
 target_link_libraries(demo_client PRIVATE login_infrastructure runtime_core)
 
 add_executable(demo_flow
     tools/demo_flow/main.cpp
+    tools/demo_support.cpp
 )
 set_backend_target_defaults(demo_flow)
 target_link_libraries(demo_flow

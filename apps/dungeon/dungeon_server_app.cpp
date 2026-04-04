@@ -82,8 +82,6 @@ bool DungeonServerApp::BuildDependencies(std::string* error_message) {
         *redis_pool_, Config().GetInt("storage.battle.context_ttl_seconds", 3600));
     player_lock_repository_ = std::make_unique<dungeon_server::dungeon::RedisPlayerLockRepository>(
         *redis_pool_, Config().GetInt("storage.player.lock_ttl_seconds", 10));
-    rocketmq_producer_ = std::make_unique<common::mq::RocketMqProducer>(
-        common::mq::ReadRocketMqOptions(Config(), "mq.rocketmq."));
     dungeon_service_ = std::make_unique<dungeon_server::dungeon::DungeonService>(
         *player_lock_repository_,
         *player_snapshot_port_,
@@ -91,43 +89,6 @@ bool DungeonServerApp::BuildDependencies(std::string* error_message) {
         *dungeon_repository_,
         *battle_context_repository_);
     return true;
-}
-
-void DungeonServerApp::TryPublishSettlementEvent(std::int64_t reward_grant_id) const {
-    if (reward_grant_id <= 0 || dungeon_repository_ == nullptr || rocketmq_producer_ == nullptr) {
-        return;
-    }
-
-    auto& logger = common::log::Logger::Instance();
-    const auto event = dungeon_repository_->FindOutboxEventById(reward_grant_id);
-    if (!event.has_value()) {
-        logger.Log(common::log::LogLevel::kWarn,
-                   "battle settlement outbox event not found: reward_grant_id=" + std::to_string(reward_grant_id));
-        return;
-    }
-    if (event->publish_status != 0) {
-        return;
-    }
-
-    std::string error_message;
-    const auto published = rocketmq_producer_->Publish({Config().GetString("mq.rocketmq.topic", "battle.settlement.v1"),
-                                                        event->idempotency_key,
-                                                        std::to_string(event->player_id == 0 ? event->session_id
-                                                                                             : event->player_id),
-                                                        event->payload_json},
-                                                       &error_message);
-    if (!published) {
-        logger.Log(common::log::LogLevel::kWarn,
-                   "battle settlement rocketmq publish failed: reward_grant_id=" + std::to_string(reward_grant_id) +
-                       ", error=" + error_message);
-        return;
-    }
-
-    if (!dungeon_repository_->MarkOutboxPublished(event->event_id, &error_message)) {
-        logger.Log(common::log::LogLevel::kWarn,
-                   "battle settlement outbox mark published failed: reward_grant_id=" +
-                       std::to_string(reward_grant_id) + ", error=" + error_message);
-    }
 }
 
 void DungeonServerApp::RegisterRoutes() {
@@ -179,7 +140,6 @@ common::net::Packet DungeonServerApp::HandleSettleBattleRequest(const framework:
         return framework::protocol::BuildErrorResponse(context.request, result.error_code, result.error_message);
     }
 
-    TryPublishSettlementEvent(result.reward_grant_id);
     return BuildSettleBattleResponsePacket(context, result);
 }
 

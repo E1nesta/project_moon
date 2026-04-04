@@ -41,19 +41,8 @@ public:
                                                             std::int64_t client_score,
                                                             std::int64_t reward_grant_id,
                                                             const std::vector<common::model::Reward>& rewards,
-                                                            const std::string& idempotency_key,
-                                                            const std::string& trace_id) override;
+                                                            const std::string& idempotency_key) override;
     [[nodiscard]] RewardGrantStatusResult GetRewardGrantStatus(std::int64_t reward_grant_id) const override;
-    [[nodiscard]] std::vector<BattleOutboxEvent> LoadPublishableOutboxEvents(std::size_t limit) override;
-    bool MarkOutboxPublished(std::int64_t event_id, std::string* error_message = nullptr) override;
-    [[nodiscard]] std::vector<BattleOutboxEvent> LoadConsumableOutboxEvents(std::size_t limit) override;
-    [[nodiscard]] std::optional<BattleOutboxEvent> FindOutboxEventById(std::int64_t event_id) const override;
-    bool ScheduleOutboxRetry(std::int64_t event_id, std::string* error_message = nullptr) override;
-    bool MarkRewardGrantDone(std::int64_t reward_grant_id,
-                             const std::vector<common::model::Reward>& rewards,
-                             std::string* error_message = nullptr) override;
-    bool MarkRewardGrantFailed(std::int64_t reward_grant_id, std::string* error_message = nullptr) override;
-    bool MarkOutboxConsumed(std::int64_t event_id, std::string* error_message = nullptr) override;
 
 private:
     [[nodiscard]] static std::string CurrentMonthSuffix();

@@ -146,6 +146,8 @@ EnterBattleResult MySqlDungeonRepository::CreateBattleSession(std::int64_t sessi
                                                              std::int64_t seed,
                                                              const std::string& idempotency_key,
                                                              const std::string& trace_id) {
+    (void)idempotency_key;
+    (void)trace_id;
     std::optional<common::mysql::MySqlClientPool::Lease> lease;
     auto* mysql = ResolveClient(mysql_pool_, mysql_client_, &lease);
     std::string error_message;
@@ -192,19 +194,6 @@ EnterBattleResult MySqlDungeonRepository::CreateBattleSession(std::int64_t sessi
             break;
         }
 
-        std::ostringstream outbox_sql;
-        outbox_sql << "INSERT INTO battle_outbox (event_id, session_id, aggregate_type, aggregate_id, event_type, payload_json, "
-                      "idempotency_key, trace_id, publish_status, retry_count, created_at, updated_at) VALUES ("
-                   << session_id << ", " << session_id << ", 'battle_session', '" << session_id << "', "
-                   << "'battle.session.created', JSON_OBJECT('session_id', " << session_id << ", 'player_id', " << player_id
-                   << ", 'stage_id', " << stage_id << "), '" << Escape(*mysql, idempotency_key) << "', '"
-                   << Escape(*mysql, trace_id) << "', 1, 0, CURRENT_TIMESTAMP(3), CURRENT_TIMESTAMP(3))";
-        if (!mysql->Execute(outbox_sql.str(), &error_message)) {
-            result.error = DungeonRepositoryError::kStorageFailure;
-            result.error_message = error_message;
-            break;
-        }
-
         result.success = true;
         result.battle_context.session_id = session_id;
         result.battle_context.player_id = player_id;
@@ -243,8 +232,7 @@ SettleBattleResult MySqlDungeonRepository::RecordBattleSettlement(std::int64_t s
                                                                  std::int64_t client_score,
                                                                  std::int64_t reward_grant_id,
                                                                  const std::vector<common::model::Reward>& rewards,
-                                                                 const std::string& idempotency_key,
-                                                                 const std::string& trace_id) {
+                                                                 const std::string& idempotency_key) {
     std::optional<common::mysql::MySqlClientPool::Lease> lease;
     auto* mysql = ResolveClient(mysql_pool_, mysql_client_, &lease);
     std::string error_message;
@@ -286,24 +274,9 @@ SettleBattleResult MySqlDungeonRepository::RecordBattleSettlement(std::int64_t s
         grant_sql << "INSERT INTO " << RewardGrantTable()
                   << " (grant_id, session_id, player_id, reward_json, grant_status, idempotency_key, granted_at) VALUES ("
                   << reward_grant_id << ", " << session_id << ", " << player_id << ", '"
-                  << Escape(*mysql, SerializeRewardsJson(rewards)) << "', 0, '" << Escape(*mysql, idempotency_key)
-                  << "', NULL)";
+                  << Escape(*mysql, SerializeRewardsJson(rewards)) << "', 1, '" << Escape(*mysql, idempotency_key)
+                  << "', CURRENT_TIMESTAMP(3))";
         if (!mysql->Execute(grant_sql.str(), &error_message)) {
-            result.error = DungeonRepositoryError::kStorageFailure;
-            result.error_message = error_message;
-            break;
-        }
-
-        std::ostringstream outbox_sql;
-        outbox_sql << "INSERT INTO battle_outbox (event_id, session_id, aggregate_type, aggregate_id, event_type, payload_json, "
-                      "idempotency_key, trace_id, publish_status, retry_count, created_at, updated_at) VALUES ("
-                   << reward_grant_id << ", " << session_id << ", 'reward_grant', '" << reward_grant_id << "', "
-                   << "'battle.settlement.v1', JSON_OBJECT('trace_id', '" << Escape(*mysql, trace_id)
-                   << "', 'session_id', " << session_id << ", 'grant_id', " << reward_grant_id << ", 'player_id', "
-                   << player_id << ", 'reward_json', '" << Escape(*mysql, SerializeRewardsJson(rewards))
-                   << "', 'event_id', " << reward_grant_id << "), '" << Escape(*mysql, idempotency_key) << "', '"
-                   << Escape(*mysql, trace_id) << "', 0, 0, CURRENT_TIMESTAMP(3), CURRENT_TIMESTAMP(3))";
-        if (!mysql->Execute(outbox_sql.str(), &error_message)) {
             result.error = DungeonRepositoryError::kStorageFailure;
             result.error_message = error_message;
             break;
@@ -336,151 +309,6 @@ RewardGrantStatusResult MySqlDungeonRepository::GetRewardGrantStatus(std::int64_
     }
     return {true, std::stoi(row->at("grant_status")), ParseRewardsFromDigest(row->at("reward_json")),
             DungeonRepositoryError::kNone, ""};
-}
-
-std::vector<BattleOutboxEvent> MySqlDungeonRepository::LoadPublishableOutboxEvents(std::size_t limit) {
-    std::optional<common::mysql::MySqlClientPool::Lease> lease;
-    auto* mysql = ResolveClient(mysql_pool_, mysql_client_, &lease);
-    std::ostringstream sql;
-    sql << "SELECT bo.event_id, bo.session_id, bo.payload_json, bo.idempotency_key, bo.trace_id, bo.publish_status, "
-           "bo.retry_count, rg.player_id, rg.grant_id, rg.reward_json "
-           "FROM battle_outbox bo LEFT JOIN "
-        << RewardGrantTable()
-        << " rg ON rg.grant_id = bo.event_id WHERE bo.publish_status = 0 ORDER BY bo.created_at ASC LIMIT "
-        << limit;
-    const auto rows = mysql->Query(sql.str());
-    std::vector<BattleOutboxEvent> events;
-    for (const auto& row : rows) {
-        BattleOutboxEvent event;
-        event.event_id = std::stoll(row.at("event_id"));
-        event.session_id = std::stoll(row.at("session_id"));
-        if (const auto player_iter = row.find("player_id"); player_iter != row.end() && !player_iter->second.empty()) {
-            event.player_id = std::stoll(player_iter->second);
-        }
-        if (const auto grant_iter = row.find("grant_id"); grant_iter != row.end() && !grant_iter->second.empty()) {
-            event.reward_grant_id = std::stoll(grant_iter->second);
-        }
-        event.payload_json = row.at("payload_json");
-        if (const auto reward_iter = row.find("reward_json"); reward_iter != row.end()) {
-            event.reward_json = reward_iter->second;
-        }
-        event.idempotency_key = row.at("idempotency_key");
-        event.trace_id = row.at("trace_id");
-        event.publish_status = std::stoi(row.at("publish_status"));
-        event.retry_count = std::stoi(row.at("retry_count"));
-        events.push_back(std::move(event));
-    }
-    return events;
-}
-
-bool MySqlDungeonRepository::MarkOutboxPublished(std::int64_t event_id, std::string* error_message) {
-    std::optional<common::mysql::MySqlClientPool::Lease> lease;
-    auto* mysql = ResolveClient(mysql_pool_, mysql_client_, &lease);
-    std::ostringstream sql;
-    sql << "UPDATE battle_outbox SET publish_status = 1, published_at = CURRENT_TIMESTAMP(3), "
-           "updated_at = CURRENT_TIMESTAMP(3) WHERE event_id = "
-        << event_id << " AND publish_status = 0";
-    return mysql->Execute(sql.str(), error_message);
-}
-
-std::vector<BattleOutboxEvent> MySqlDungeonRepository::LoadConsumableOutboxEvents(std::size_t limit) {
-    std::optional<common::mysql::MySqlClientPool::Lease> lease;
-    auto* mysql = ResolveClient(mysql_pool_, mysql_client_, &lease);
-    std::ostringstream sql;
-    sql << "SELECT bo.event_id, bo.session_id, bo.payload_json, bo.idempotency_key, bo.trace_id, bo.publish_status, "
-           "bo.retry_count, rg.player_id, rg.grant_id, rg.reward_json FROM battle_outbox bo JOIN "
-        << RewardGrantTable()
-        << " rg ON rg.grant_id = bo.event_id WHERE bo.publish_status = 1 AND rg.grant_status = 0 ORDER BY bo.created_at ASC LIMIT "
-        << limit;
-    const auto rows = mysql->Query(sql.str());
-    std::vector<BattleOutboxEvent> events;
-    for (const auto& row : rows) {
-        BattleOutboxEvent event;
-        event.event_id = std::stoll(row.at("event_id"));
-        event.session_id = std::stoll(row.at("session_id"));
-        event.player_id = std::stoll(row.at("player_id"));
-        event.reward_grant_id = std::stoll(row.at("grant_id"));
-        event.payload_json = row.at("payload_json");
-        event.reward_json = row.at("reward_json");
-        event.idempotency_key = row.at("idempotency_key");
-        event.trace_id = row.at("trace_id");
-        event.publish_status = std::stoi(row.at("publish_status"));
-        event.retry_count = std::stoi(row.at("retry_count"));
-        events.push_back(std::move(event));
-    }
-    return events;
-}
-
-std::optional<BattleOutboxEvent> MySqlDungeonRepository::FindOutboxEventById(std::int64_t event_id) const {
-    std::optional<common::mysql::MySqlClientPool::Lease> lease;
-    auto* mysql = ResolveClient(mysql_pool_, mysql_client_, &lease);
-    std::ostringstream sql;
-    sql << "SELECT bo.event_id, bo.session_id, bo.payload_json, bo.idempotency_key, bo.trace_id, bo.publish_status, "
-           "bo.retry_count, rg.player_id, rg.grant_id, rg.reward_json FROM battle_outbox bo LEFT JOIN "
-        << RewardGrantTable() << " rg ON rg.grant_id = bo.event_id WHERE bo.event_id = " << event_id << " LIMIT 1";
-    const auto row = mysql->QueryOne(sql.str());
-    if (!row.has_value()) {
-        return std::nullopt;
-    }
-
-    BattleOutboxEvent event;
-    event.event_id = std::stoll(row->at("event_id"));
-    event.session_id = std::stoll(row->at("session_id"));
-    if (const auto player_iter = row->find("player_id"); player_iter != row->end() && !player_iter->second.empty()) {
-        event.player_id = std::stoll(player_iter->second);
-    }
-    if (const auto grant_iter = row->find("grant_id"); grant_iter != row->end() && !grant_iter->second.empty()) {
-        event.reward_grant_id = std::stoll(grant_iter->second);
-    }
-    event.payload_json = row->at("payload_json");
-    if (const auto reward_iter = row->find("reward_json"); reward_iter != row->end()) {
-        event.reward_json = reward_iter->second;
-    }
-    event.idempotency_key = row->at("idempotency_key");
-    event.trace_id = row->at("trace_id");
-    event.publish_status = std::stoi(row->at("publish_status"));
-    event.retry_count = std::stoi(row->at("retry_count"));
-    return event;
-}
-
-bool MySqlDungeonRepository::ScheduleOutboxRetry(std::int64_t event_id, std::string* error_message) {
-    std::optional<common::mysql::MySqlClientPool::Lease> lease;
-    auto* mysql = ResolveClient(mysql_pool_, mysql_client_, &lease);
-    std::ostringstream sql;
-    sql << "UPDATE battle_outbox SET retry_count = retry_count + 1, next_retry_at = DATE_ADD(CURRENT_TIMESTAMP(3), "
-           "INTERVAL 1 SECOND), updated_at = CURRENT_TIMESTAMP(3) WHERE event_id = "
-        << event_id;
-    return mysql->Execute(sql.str(), error_message);
-}
-
-bool MySqlDungeonRepository::MarkRewardGrantDone(std::int64_t reward_grant_id,
-                                                 const std::vector<common::model::Reward>& rewards,
-                                                 std::string* error_message) {
-    std::optional<common::mysql::MySqlClientPool::Lease> lease;
-    auto* mysql = ResolveClient(mysql_pool_, mysql_client_, &lease);
-    std::ostringstream sql;
-    sql << "UPDATE " << RewardGrantTable() << " SET grant_status = 1, reward_json = '"
-        << Escape(*mysql, SerializeRewardsJson(rewards))
-        << "', granted_at = CURRENT_TIMESTAMP(3) WHERE grant_id = " << reward_grant_id;
-    return mysql->Execute(sql.str(), error_message);
-}
-
-bool MySqlDungeonRepository::MarkRewardGrantFailed(std::int64_t reward_grant_id, std::string* error_message) {
-    std::optional<common::mysql::MySqlClientPool::Lease> lease;
-    auto* mysql = ResolveClient(mysql_pool_, mysql_client_, &lease);
-    std::ostringstream sql;
-    sql << "UPDATE " << RewardGrantTable() << " SET grant_status = 2 WHERE grant_id = " << reward_grant_id;
-    return mysql->Execute(sql.str(), error_message);
-}
-
-bool MySqlDungeonRepository::MarkOutboxConsumed(std::int64_t event_id, std::string* error_message) {
-    std::optional<common::mysql::MySqlClientPool::Lease> lease;
-    auto* mysql = ResolveClient(mysql_pool_, mysql_client_, &lease);
-    std::ostringstream sql;
-    sql << "UPDATE battle_outbox SET publish_status = 2, next_retry_at = NULL, updated_at = CURRENT_TIMESTAMP(3) "
-           "WHERE event_id = "
-        << event_id;
-    return mysql->Execute(sql.str(), error_message);
 }
 
 std::string MySqlDungeonRepository::CurrentMonthSuffix() {

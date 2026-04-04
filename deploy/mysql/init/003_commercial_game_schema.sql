@@ -357,26 +357,6 @@ DELIMITER ;
 
 USE battle_db;
 
-CREATE TABLE IF NOT EXISTS battle_outbox (
-    event_id BIGINT PRIMARY KEY,
-    session_id BIGINT NOT NULL,
-    aggregate_type VARCHAR(32) NOT NULL,
-    aggregate_id VARCHAR(64) NOT NULL,
-    event_type VARCHAR(64) NOT NULL,
-    payload_json JSON NOT NULL,
-    idempotency_key VARCHAR(64) NOT NULL,
-    trace_id VARCHAR(64) NOT NULL,
-    publish_status TINYINT NOT NULL DEFAULT 0, -- 0 pending 1 published 2 consumed
-    retry_count INT NOT NULL DEFAULT 0,
-    next_retry_at DATETIME(3) NULL,
-    published_at DATETIME(3) NULL,
-    created_at DATETIME(3) NOT NULL,
-    updated_at DATETIME(3) NOT NULL,
-    UNIQUE KEY uk_idempotency (idempotency_key),
-    KEY idx_session_status (session_id, publish_status, next_retry_at),
-    KEY idx_aggregate (aggregate_type, aggregate_id, created_at)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
-
 CREATE TABLE IF NOT EXISTS battle_month_registry (
     archive_month CHAR(6) PRIMARY KEY,
     created_at DATETIME(3) NOT NULL

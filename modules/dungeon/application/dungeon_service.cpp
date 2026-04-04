@@ -109,6 +109,7 @@ EnterBattleResponse DungeonService::EnterBattle(const EnterBattleRequest& reques
 }
 
 SettleBattleResponse DungeonService::SettleBattle(const SettleBattleRequest& request, const std::string& trace_id) {
+    (void)trace_id;
     const auto config = LoadDungeonConfig(request.stage_id);
     if (!config.has_value()) {
         return BuildSettleError(common::error::ErrorCode::kDungeonNotFound, "stage config not found");
@@ -149,7 +150,14 @@ SettleBattleResponse DungeonService::SettleBattle(const SettleBattleRequest& req
         rewards.push_back({"diamond", config->first_clear_diamond_reward});
     }
 
-    const auto reward_grant_id = id_generator_.Next();
+    const auto reward_grant_id = request.session_id;
+    const auto settle_idempotency_key = SettleIdempotencyKey(request.player_id, request.session_id);
+    const auto apply_reward = player_snapshot_port_.ApplyRewardGrant(
+        request.player_id, reward_grant_id, request.session_id, rewards, settle_idempotency_key);
+    if (!apply_reward.success) {
+        return BuildSettleError(apply_reward.error_code, apply_reward.error_message);
+    }
+
     const auto settle_result = dungeon_repository_.RecordBattleSettlement(request.session_id,
                                                                           request.player_id,
                                                                           request.stage_id,
@@ -158,14 +166,13 @@ SettleBattleResponse DungeonService::SettleBattle(const SettleBattleRequest& req
                                                                           request.client_score,
                                                                           reward_grant_id,
                                                                           rewards,
-                                                                          SettleIdempotencyKey(request.player_id, request.session_id),
-                                                                          trace_id);
+                                                                          settle_idempotency_key);
     if (!settle_result.success) {
         return BuildSettleError(MapSettleStorageError(settle_result.error), settle_result.error_message);
     }
 
     battle_context_repository_.Delete(request.session_id);
-    return {true, common::error::ErrorCode::kOk, "", reward_grant_id, 0, rewards};
+    return {true, common::error::ErrorCode::kOk, "", reward_grant_id, 1, rewards};
 }
 
 RewardGrantStatusResponse DungeonService::GetRewardGrantStatus(std::int64_t reward_grant_id) const {

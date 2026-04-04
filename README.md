@@ -6,8 +6,7 @@
 - `login_server` 负责账号登录和 session 签发
 - `player_server` 负责玩家状态读取与缓存
 - `player_internal_grpc_server` 负责向其他服务暴露玩家域内部写接口
-- `dungeon_server` 负责进入战斗、结算、奖励事件落库
-- `battle_reward_worker` 负责 RocketMQ 消费、重试和最终奖励发放
+- `dungeon_server` 负责进入战斗、结算以及同步奖励落账
 
 ## 仓库结构
 
@@ -55,9 +54,6 @@
 
 - MySQL
 - Redis
-- RocketMQ NameServer
-- RocketMQ Broker
-- RocketMQ Proxy
 - Nginx
 - 各个后端服务进程本身
 
@@ -81,7 +77,7 @@
 1. 在 WSL 安装开发依赖
 2. 在 WSL 安装系统版 gRPC/Protobuf 开发包
 3. 在 WSL 本地编译二进制
-4. 用 Docker 启动 MySQL、Redis、RocketMQ、Nginx 等环境
+4. 用 Docker 启动 MySQL、Redis、Nginx 等环境
 5. 本地二进制连接 Docker 提供的依赖
 
 相关脚本：
@@ -139,9 +135,6 @@ docker compose --env-file deploy/.env.demo -f deploy/docker-compose.yml down --r
 - `7400`：`player_internal_grpc_server`
 - `3307`：MySQL 映射到宿主机
 - `6379`：Redis 映射到宿主机
-- `9876`：RocketMQ NameServer
-- `8081`：RocketMQ Proxy gRPC/客户端入口
-
 ## 配置文件怎么选
 
 - `configs/local/` 适合本地直接运行服务二进制
@@ -156,7 +149,7 @@ docker compose --env-file deploy/.env.demo -f deploy/docker-compose.yml down --r
 
 ## 现状说明
 
-当前代码里的主流程已经以 `EnterBattle / SettleBattle / GetRewardGrantStatus` 为主，同时还保留了一部分旧的 `EnterDungeon / SettleDungeon` 兼容字段和消息别名。之前那份根目录 MVP 文档描述的是更早阶段的边界，和现在的协议、服务拆分、异步奖励链路已经不一致，所以已移除，改由本 README 作为当前入口说明。
+当前代码里的主流程已经以 `EnterBattle / SettleBattle / GetRewardGrantStatus` 为主，同时还保留了一部分旧的 `EnterDungeon / SettleDungeon` 兼容字段和消息别名。之前那份根目录 MVP 文档描述的是更早阶段的边界，和现在的协议、服务拆分已经不一致，所以已移除，改由本 README 作为当前入口说明。
 
 文档维护原则：
 

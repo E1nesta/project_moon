@@ -41,19 +41,6 @@ struct RewardGrantStatusResult {
     std::string error_message;
 };
 
-struct BattleOutboxEvent {
-    std::int64_t event_id = 0;
-    std::int64_t session_id = 0;
-    std::int64_t player_id = 0;
-    std::int64_t reward_grant_id = 0;
-    std::string payload_json;
-    std::string reward_json;
-    std::string idempotency_key;
-    std::string trace_id;
-    int publish_status = 0;
-    int retry_count = 0;
-};
-
 class DungeonRepository {
 public:
     virtual ~DungeonRepository() = default;
@@ -80,20 +67,8 @@ public:
                                                                     std::int64_t client_score,
                                                                     std::int64_t reward_grant_id,
                                                                     const std::vector<common::model::Reward>& rewards,
-                                                                    const std::string& idempotency_key,
-                                                                    const std::string& trace_id) = 0;
+                                                                    const std::string& idempotency_key) = 0;
     [[nodiscard]] virtual RewardGrantStatusResult GetRewardGrantStatus(std::int64_t reward_grant_id) const = 0;
-    [[nodiscard]] virtual std::vector<BattleOutboxEvent> LoadPublishableOutboxEvents(std::size_t limit) = 0;
-    virtual bool MarkOutboxPublished(std::int64_t event_id, std::string* error_message = nullptr) = 0;
-    [[nodiscard]] virtual std::vector<BattleOutboxEvent> LoadConsumableOutboxEvents(std::size_t limit) = 0;
-    [[nodiscard]] virtual std::optional<BattleOutboxEvent> FindOutboxEventById(std::int64_t event_id) const = 0;
-    virtual bool ScheduleOutboxRetry(std::int64_t event_id, std::string* error_message = nullptr) = 0;
-    virtual bool MarkRewardGrantDone(std::int64_t reward_grant_id,
-                                     const std::vector<common::model::Reward>& rewards,
-                                     std::string* error_message = nullptr) = 0;
-    virtual bool MarkRewardGrantFailed(std::int64_t reward_grant_id,
-                                       std::string* error_message = nullptr) = 0;
-    virtual bool MarkOutboxConsumed(std::int64_t event_id, std::string* error_message = nullptr) = 0;
 };
 
 }  // namespace dungeon_server::dungeon

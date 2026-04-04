@@ -30,7 +30,6 @@ RUN cmake --preset dev-release -DBUILD_TESTING=OFF && cmake --build --preset dev
     player_server \
     player_internal_grpc_server \
     dungeon_server \
-    battle_reward_worker \
     service_check \
     password_tool
 
@@ -57,7 +56,6 @@ COPY --from=builder /src/build/dev-release/login_server /app/login_server
 COPY --from=builder /src/build/dev-release/player_server /app/player_server
 COPY --from=builder /src/build/dev-release/player_internal_grpc_server /app/player_internal_grpc_server
 COPY --from=builder /src/build/dev-release/dungeon_server /app/dungeon_server
-COPY --from=builder /src/build/dev-release/battle_reward_worker /app/battle_reward_worker
 COPY --from=builder /src/build/dev-release/service_check /app/service_check
 COPY --from=builder /src/build/dev-release/password_tool /app/password_tool
 COPY --from=builder /src/configs /app/configs
