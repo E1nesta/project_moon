@@ -85,14 +85,19 @@ GatewayServerApp::GatewayServerApp()
 bool GatewayServerApp::BuildDependencies(std::string* error_message) {
     instance_id_ = Config().GetString("service.instance_id", Config().GetString("service.name", "gateway_server"));
 
-    const auto redis_options = common::redis::ReadConnectionOptions(Config());
+    const auto session_redis_prefix =
+        Config().Contains("storage.account.redis.host") ? "storage.account.redis." : "storage.redis.";
+    const auto rate_limit_redis_prefix =
+        Config().Contains("gateway.rate_limit.redis.host") ? "gateway.rate_limit.redis." : session_redis_prefix;
+    const auto redis_options = common::redis::ReadConnectionOptions(Config(), session_redis_prefix);
     session_redis_pool_ = std::make_unique<common::redis::RedisClientPool>(
         redis_options,
-        static_cast<std::size_t>(Config().GetInt("storage.redis.pool_size", 4)));
+        static_cast<std::size_t>(Config().GetInt(session_redis_prefix + std::string("pool_size"), 4)));
     rate_limit_redis_pool_ = std::make_unique<common::redis::RedisClientPool>(
-        common::redis::ReadConnectionOptions(Config()),
+        common::redis::ReadConnectionOptions(Config(), rate_limit_redis_prefix),
         static_cast<std::size_t>(
-            Config().GetInt("gateway.rate_limit.redis.pool_size", Config().GetInt("storage.redis.pool_size", 4))));
+            Config().GetInt("gateway.rate_limit.redis.pool_size",
+                            Config().GetInt(rate_limit_redis_prefix + std::string("pool_size"), 4))));
     if (!session_redis_pool_->Initialize(error_message)) {
         return false;
     }

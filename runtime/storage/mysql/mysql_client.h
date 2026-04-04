@@ -22,6 +22,7 @@ struct ConnectionOptions {
 };
 
 ConnectionOptions ReadConnectionOptions(const config::SimpleConfig& config);
+ConnectionOptions ReadConnectionOptions(const config::SimpleConfig& config, const std::string& prefix);
 
 using Row = std::unordered_map<std::string, std::string>;
 

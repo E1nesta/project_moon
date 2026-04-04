@@ -99,8 +99,9 @@ framework::transport::UpstreamClientPool& GatewayForwardExecutor::ResolveUpstrea
         return *login_upstream_;
     case common::net::MessageId::kLoadPlayerRequest:
         return *player_upstream_;
-    case common::net::MessageId::kEnterDungeonRequest:
-    case common::net::MessageId::kSettleDungeonRequest:
+    case common::net::MessageId::kEnterBattleRequest:
+    case common::net::MessageId::kSettleBattleRequest:
+    case common::net::MessageId::kGetRewardGrantStatusRequest:
         return *dungeon_upstream_;
     default:
         return *login_upstream_;

@@ -22,6 +22,10 @@ void FillProtoPlayerState(const common::model::PlayerState& state, game_backend:
     profile->set_stamina(state.profile.stamina);
     profile->set_gold(state.profile.gold);
     profile->set_diamond(state.profile.diamond);
+    profile->set_server_id(state.profile.server_id);
+    profile->set_nickname(state.profile.nickname);
+    profile->set_main_progress(state.profile.main_progress);
+    profile->set_fight_power(state.profile.fight_power);
 
     output->clear_dungeon_progress();
     for (const auto& progress : state.dungeon_progress) {
@@ -29,6 +33,21 @@ void FillProtoPlayerState(const common::model::PlayerState& state, game_backend:
         item->set_dungeon_id(progress.dungeon_id);
         item->set_best_star(progress.best_star);
         item->set_is_first_clear(progress.is_first_clear);
+    }
+
+    output->clear_currencies();
+    for (const auto& currency : state.currencies) {
+        auto* item = output->add_currencies();
+        item->set_currency_type(currency.currency_type);
+        item->set_amount(currency.amount);
+    }
+
+    output->clear_role_summaries();
+    for (const auto& role : state.role_summaries) {
+        auto* item = output->add_role_summaries();
+        item->set_role_id(role.role_id);
+        item->set_level(role.level);
+        item->set_star(role.star);
     }
 }
 
@@ -50,11 +69,11 @@ PlayerServerApp::PlayerServerApp()
 
 bool PlayerServerApp::BuildDependencies(std::string* error_message) {
     mysql_pool_ = std::make_unique<common::mysql::MySqlClientPool>(
-        common::mysql::ReadConnectionOptions(Config()),
-        static_cast<std::size_t>(Config().GetInt("storage.mysql.pool_size", 4)));
+        common::mysql::ReadConnectionOptions(Config(), "storage.player.mysql."),
+        static_cast<std::size_t>(Config().GetInt("storage.player.mysql.pool_size", 4)));
     redis_pool_ = std::make_unique<common::redis::RedisClientPool>(
-        common::redis::ReadConnectionOptions(Config()),
-        static_cast<std::size_t>(Config().GetInt("storage.redis.pool_size", 4)));
+        common::redis::ReadConnectionOptions(Config(), "storage.player.redis."),
+        static_cast<std::size_t>(Config().GetInt("storage.player.redis.pool_size", 4)));
     if (!mysql_pool_->Initialize(error_message)) {
         return false;
     }

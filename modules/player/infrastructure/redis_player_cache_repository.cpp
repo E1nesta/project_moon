@@ -30,16 +30,37 @@ RedisPlayerCacheRepository::RedisPlayerCacheRepository(common::redis::RedisClien
 
 bool RedisPlayerCacheRepository::Save(const common::model::PlayerState& player_state) {
     auto redis = redis_pool_.Acquire();
+    std::ostringstream currencies;
+    for (std::size_t index = 0; index < player_state.currencies.size(); ++index) {
+        if (index > 0) {
+            currencies << ';';
+        }
+        currencies << player_state.currencies[index].currency_type << ':' << player_state.currencies[index].amount;
+    }
+    std::ostringstream roles;
+    for (std::size_t index = 0; index < player_state.role_summaries.size(); ++index) {
+        if (index > 0) {
+            roles << ';';
+        }
+        roles << player_state.role_summaries[index].role_id << ':' << player_state.role_summaries[index].level << ':'
+              << player_state.role_summaries[index].star;
+    }
     return redis->HSet(
         CacheKey(player_state.profile.player_id),
         {{"player_id", std::to_string(player_state.profile.player_id)},
          {"account_id", std::to_string(player_state.profile.account_id)},
+         {"server_id", std::to_string(player_state.profile.server_id)},
          {"player_name", player_state.profile.player_name},
+         {"nickname", player_state.profile.nickname},
          {"level", std::to_string(player_state.profile.level)},
          {"stamina", std::to_string(player_state.profile.stamina)},
          {"gold", std::to_string(player_state.profile.gold)},
          {"diamond", std::to_string(player_state.profile.diamond)},
-         {"dungeon_progress", SerializeProgress(player_state)}},
+         {"main_progress", std::to_string(player_state.profile.main_progress)},
+         {"fight_power", std::to_string(player_state.profile.fight_power)},
+         {"dungeon_progress", SerializeProgress(player_state)},
+         {"currencies", currencies.str()},
+         {"role_summaries", roles.str()}},
         ttl_seconds_);
 }
 
@@ -53,12 +74,30 @@ std::optional<common::model::PlayerState> RedisPlayerCacheRepository::FindByPlay
     common::model::PlayerState state;
     state.profile.player_id = std::stoll(values->at("player_id"));
     state.profile.account_id = std::stoll(values->at("account_id"));
+    state.profile.server_id = std::stoi(values->at("server_id"));
     state.profile.player_name = values->at("player_name");
+    state.profile.nickname = values->at("nickname");
     state.profile.level = std::stoi(values->at("level"));
     state.profile.stamina = std::stoi(values->at("stamina"));
     state.profile.gold = std::stoll(values->at("gold"));
     state.profile.diamond = std::stoll(values->at("diamond"));
+    state.profile.main_progress = std::stoi(values->at("main_progress"));
+    state.profile.fight_power = std::stoll(values->at("fight_power"));
     state.dungeon_progress = ParseProgress(values->at("dungeon_progress"));
+    for (const auto& token : Split(values->at("currencies"), ';')) {
+        const auto parts = Split(token, ':');
+        if (parts.size() != 2) {
+            continue;
+        }
+        state.currencies.push_back({parts[0], std::stoll(parts[1])});
+    }
+    for (const auto& token : Split(values->at("role_summaries"), ';')) {
+        const auto parts = Split(token, ':');
+        if (parts.size() != 3) {
+            continue;
+        }
+        state.role_summaries.push_back({std::stoi(parts[0]), std::stoi(parts[1]), std::stoi(parts[2])});
+    }
     return state;
 }
 

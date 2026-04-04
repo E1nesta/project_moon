@@ -13,6 +13,12 @@ enum class MessageId : std::uint32_t {
     kLoginResponse = 1002,
     kLoadPlayerRequest = 1101,
     kLoadPlayerResponse = 1102,
+    kEnterBattleRequest = 1201,
+    kEnterBattleResponse = 1202,
+    kSettleBattleRequest = 1203,
+    kSettleBattleResponse = 1204,
+    kGetRewardGrantStatusRequest = 1205,
+    kGetRewardGrantStatusResponse = 1206,
     kEnterDungeonRequest = 1201,
     kEnterDungeonResponse = 1202,
     kSettleDungeonRequest = 1203,
@@ -35,13 +41,17 @@ inline std::optional<MessageId> MessageIdFromInt(std::uint32_t value) {
     case 1102:
         return MessageId::kLoadPlayerResponse;
     case 1201:
-        return MessageId::kEnterDungeonRequest;
+        return MessageId::kEnterBattleRequest;
     case 1202:
-        return MessageId::kEnterDungeonResponse;
+        return MessageId::kEnterBattleResponse;
     case 1203:
-        return MessageId::kSettleDungeonRequest;
+        return MessageId::kSettleBattleRequest;
     case 1204:
-        return MessageId::kSettleDungeonResponse;
+        return MessageId::kSettleBattleResponse;
+    case 1205:
+        return MessageId::kGetRewardGrantStatusRequest;
+    case 1206:
+        return MessageId::kGetRewardGrantStatusResponse;
     case 9000:
         return MessageId::kErrorResponse;
     default:
@@ -63,14 +73,18 @@ inline std::string_view ToString(MessageId message_id) {
         return "LOAD_PLAYER_REQUEST";
     case MessageId::kLoadPlayerResponse:
         return "LOAD_PLAYER_RESPONSE";
-    case MessageId::kEnterDungeonRequest:
-        return "ENTER_DUNGEON_REQUEST";
-    case MessageId::kEnterDungeonResponse:
-        return "ENTER_DUNGEON_RESPONSE";
-    case MessageId::kSettleDungeonRequest:
-        return "SETTLE_DUNGEON_REQUEST";
-    case MessageId::kSettleDungeonResponse:
-        return "SETTLE_DUNGEON_RESPONSE";
+    case MessageId::kEnterBattleRequest:
+        return "ENTER_BATTLE_REQUEST";
+    case MessageId::kEnterBattleResponse:
+        return "ENTER_BATTLE_RESPONSE";
+    case MessageId::kSettleBattleRequest:
+        return "SETTLE_BATTLE_REQUEST";
+    case MessageId::kSettleBattleResponse:
+        return "SETTLE_BATTLE_RESPONSE";
+    case MessageId::kGetRewardGrantStatusRequest:
+        return "GET_REWARD_GRANT_STATUS_REQUEST";
+    case MessageId::kGetRewardGrantStatusResponse:
+        return "GET_REWARD_GRANT_STATUS_RESPONSE";
     case MessageId::kErrorResponse:
         return "ERROR_RESPONSE";
     }
@@ -86,10 +100,12 @@ inline std::optional<MessageId> ExpectedResponseMessageId(MessageId request_id) 
         return MessageId::kLoginResponse;
     case MessageId::kLoadPlayerRequest:
         return MessageId::kLoadPlayerResponse;
-    case MessageId::kEnterDungeonRequest:
-        return MessageId::kEnterDungeonResponse;
-    case MessageId::kSettleDungeonRequest:
-        return MessageId::kSettleDungeonResponse;
+    case MessageId::kEnterBattleRequest:
+        return MessageId::kEnterBattleResponse;
+    case MessageId::kSettleBattleRequest:
+        return MessageId::kSettleBattleResponse;
+    case MessageId::kGetRewardGrantStatusRequest:
+        return MessageId::kGetRewardGrantStatusResponse;
     default:
         return std::nullopt;
     }

@@ -8,18 +8,12 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-set(GRPC_STACK_ROOT_DEFAULT "$ENV{HOME}/.local/toolchains/grpc-stack")
-if(DEFINED ENV{GRPC_STACK_ROOT} AND NOT "$ENV{GRPC_STACK_ROOT}" STREQUAL "")
-    set(GRPC_STACK_ROOT_DEFAULT "$ENV{GRPC_STACK_ROOT}")
-endif()
-set(GRPC_STACK_ROOT "${GRPC_STACK_ROOT_DEFAULT}" CACHE PATH "Root directory of the local gRPC/Protobuf toolchain")
-list(PREPEND CMAKE_PREFIX_PATH "${GRPC_STACK_ROOT}")
-
 find_package(Threads REQUIRED)
 find_package(Boost REQUIRED COMPONENTS system)
 find_package(PkgConfig REQUIRED)
-find_package(Protobuf CONFIG REQUIRED PATHS "${GRPC_STACK_ROOT}" NO_DEFAULT_PATH)
-find_package(gRPC CONFIG REQUIRED PATHS "${GRPC_STACK_ROOT}" NO_DEFAULT_PATH)
+find_package(Protobuf REQUIRED)
+find_package(OpenSSL REQUIRED)
+find_package(gRPC REQUIRED)
 pkg_check_modules(MYSQLCLIENT REQUIRED mysqlclient)
 pkg_check_modules(HIREDIS REQUIRED hiredis)
 pkg_check_modules(OPENSSL REQUIRED openssl)
@@ -28,8 +22,10 @@ if(BUILD_TESTING)
     find_package(Python3 REQUIRED COMPONENTS Interpreter)
 endif()
 
-find_program(PROTOC_EXECUTABLE protoc PATHS "${GRPC_STACK_ROOT}/bin" NO_DEFAULT_PATH REQUIRED)
-find_program(GRPC_CPP_PLUGIN_EXECUTABLE grpc_cpp_plugin PATHS "${GRPC_STACK_ROOT}/bin" NO_DEFAULT_PATH REQUIRED)
+find_program(PROTOC_EXECUTABLE protoc REQUIRED)
+find_program(GRPC_CPP_PLUGIN_EXECUTABLE grpc_cpp_plugin REQUIRED)
+
+message(STATUS "Using system gRPC/Protobuf toolchain")
 
 function(generate_proto_sources proto_relative_path out_srcs out_hdrs)
     get_filename_component(proto_name "${proto_relative_path}" NAME_WE)
@@ -85,12 +81,23 @@ endfunction()
 
 generate_proto_sources("game_backend.proto" PROTO_SRCS PROTO_HDRS)
 generate_proto_sources("internal/player_internal.proto" INTERNAL_PROTO_SRCS INTERNAL_PROTO_HDRS)
+generate_proto_sources("apache/rocketmq/v2/definition.proto" ROCKETMQ_DEF_PROTO_SRCS ROCKETMQ_DEF_PROTO_HDRS)
+generate_proto_sources("apache/rocketmq/v2/service.proto" ROCKETMQ_SERVICE_PROTO_SRCS ROCKETMQ_SERVICE_PROTO_HDRS)
 generate_grpc_sources(
     "internal/player_internal.proto"
     INTERNAL_GRPC_SRCS
     INTERNAL_GRPC_HDRS
     "${INTERNAL_PROTO_SRCS}"
     "${INTERNAL_PROTO_HDRS}"
+)
+generate_grpc_sources(
+    "apache/rocketmq/v2/service.proto"
+    ROCKETMQ_SERVICE_GRPC_SRCS
+    ROCKETMQ_SERVICE_GRPC_HDRS
+    "${ROCKETMQ_SERVICE_PROTO_SRCS}"
+    "${ROCKETMQ_SERVICE_PROTO_HDRS}"
+    "${ROCKETMQ_DEF_PROTO_SRCS}"
+    "${ROCKETMQ_DEF_PROTO_HDRS}"
 )
 
 add_library(protocol STATIC
@@ -121,6 +128,21 @@ target_include_directories(internal_protocol
         ${CMAKE_CURRENT_BINARY_DIR}
 )
 
+add_library(rocketmq_protocol STATIC
+    ${ROCKETMQ_DEF_PROTO_SRCS}
+    ${ROCKETMQ_SERVICE_PROTO_SRCS}
+    ${ROCKETMQ_SERVICE_GRPC_SRCS}
+)
+target_link_libraries(rocketmq_protocol
+    PUBLIC
+        protobuf::libprotobuf
+        gRPC::grpc++
+)
+target_include_directories(rocketmq_protocol
+    PUBLIC
+        ${CMAKE_CURRENT_BINARY_DIR}
+)
+
 function(set_backend_target_defaults target)
     target_include_directories(${target}
         PUBLIC
@@ -147,6 +169,7 @@ endfunction()
 
 add_library(runtime_foundation STATIC
     runtime/foundation/config/simple_config.cpp
+    runtime/foundation/id/id_generator.cpp
     runtime/foundation/log/logger.cpp
     runtime/foundation/security/password_hasher.cpp
     runtime/foundation/security/session_token.cpp
@@ -160,6 +183,7 @@ target_compile_definitions(runtime_foundation PUBLIC MOBILE_GAME_BACKEND_VERSION
 
 add_library(runtime_storage STATIC
     runtime/storage/mysql/mysql_client.cpp
+    runtime/mq/rocketmq_client.cpp
     runtime/storage/mysql/mysql_client_pool.cpp
     runtime/storage/redis/redis_client.cpp
     runtime/storage/redis/redis_client_pool.cpp
@@ -168,6 +192,9 @@ set_backend_target_defaults(runtime_storage)
 target_link_libraries(runtime_storage
     PUBLIC
         runtime_foundation
+        rocketmq_protocol
+        protobuf::libprotobuf
+        gRPC::grpc++
         ${MYSQLCLIENT_LIBRARIES}
         ${HIREDIS_LIBRARIES}
 )
@@ -397,6 +424,12 @@ add_backend_executable(dungeon_server
     apps/dungeon/dungeon_server_app.cpp
 )
 target_link_libraries(dungeon_server PRIVATE dungeon_application dungeon_infrastructure runtime_core)
+
+add_backend_executable(battle_reward_worker
+    apps/battle_reward_worker/main.cpp
+    apps/battle_reward_worker/battle_reward_worker_app.cpp
+)
+target_link_libraries(battle_reward_worker PRIVATE dungeon_application dungeon_infrastructure runtime_core)
 
 add_executable(service_check
     tools/service_check/main.cpp

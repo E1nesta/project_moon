@@ -8,6 +8,20 @@ x-backend-service: &backend-service
     - ${DELIVERY_ENV_FILE:-./.env.delivery.example}
 
 services:
+  battle_schema_migrator:
+    image: mysql:8.0
+    restart: "no"
+    env_file:
+      - ${DELIVERY_ENV_FILE:-./.env.delivery.example}
+    depends_on:
+      mysql:
+        condition: service_healthy
+    volumes:
+      - ./mysql/init:/docker-entrypoint-initdb.d:ro
+    entrypoint: ["sh", "-lc"]
+    command:
+      - mysql -hmysql -uroot -p"$MYSQL_ROOT_PASSWORD" < /docker-entrypoint-initdb.d/003_commercial_game_schema.sql
+
   mysql:
     image: mysql:8.0
     restart: unless-stopped
@@ -41,6 +55,42 @@ services:
       interval: 10s
       timeout: 5s
       retries: 10
+
+  rocketmq_namesrv:
+    image: apache/rocketmq:5.3.2
+    restart: unless-stopped
+    ports:
+      - "9876:9876"
+    command: ["sh", "mqnamesrv"]
+
+  rocketmq_broker:
+    image: apache/rocketmq:5.3.2
+    restart: unless-stopped
+    environment:
+      NAMESRV_ADDR: rocketmq_namesrv:9876
+    depends_on:
+      rocketmq_namesrv:
+        condition: service_started
+    ports:
+      - "10909:10909"
+      - "10911:10911"
+      - "10912:10912"
+    command: ["sh", "mqbroker", "-n", "rocketmq_namesrv:9876"]
+
+  rocketmq_proxy:
+    image: apache/rocketmq:5.3.2
+    restart: unless-stopped
+    environment:
+      NAMESRV_ADDR: rocketmq_namesrv:9876
+    depends_on:
+      rocketmq_namesrv:
+        condition: service_started
+      rocketmq_broker:
+        condition: service_started
+    ports:
+      - "8080:8080"
+      - "8081:8081"
+    command: ["sh", "mqproxy", "-n", "rocketmq_namesrv:9876"]
 
   login_server:
     <<: *backend-service
@@ -94,6 +144,8 @@ services:
     volumes:
       - ./tls:/etc/game_backend/tls:ro
     depends_on:
+      battle_schema_migrator:
+        condition: service_completed_successfully
       mysql:
         condition: service_healthy
       redis:
@@ -105,6 +157,21 @@ services:
       interval: 5s
       timeout: 3s
       retries: 20
+
+  battle_reward_worker:
+    <<: *backend-service
+    command: ["./battle_reward_worker", "--config", "configs/battle_reward_worker.conf"]
+    depends_on:
+      battle_schema_migrator:
+        condition: service_completed_successfully
+      mysql:
+        condition: service_healthy
+      player_internal_grpc_server:
+        condition: service_healthy
+      rocketmq_namesrv:
+        condition: service_started
+      rocketmq_broker:
+        condition: service_started
 
   gateway_1:
     <<: *backend-service

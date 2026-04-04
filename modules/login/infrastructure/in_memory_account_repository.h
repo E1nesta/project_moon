@@ -12,6 +12,11 @@ public:
     static InMemoryAccountRepository FromConfig(const common::config::SimpleConfig& config);
 
     [[nodiscard]] std::optional<common::model::Account> FindByName(const std::string& account_name) const override;
+    bool RecordLoginAudit(std::int64_t account_id,
+                          bool success,
+                          const std::string& trace_id,
+                          std::string* error_message = nullptr) override;
+    bool UpdateLastLoginTime(std::int64_t account_id, std::string* error_message = nullptr) override;
 
 private:
     explicit InMemoryAccountRepository(common::model::Account account);
@@ -20,4 +25,3 @@ private:
 };
 
 }  // namespace login_server::auth
-

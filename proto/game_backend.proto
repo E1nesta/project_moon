@@ -51,11 +51,28 @@ message PlayerProfile {
   int32 stamina = 5;
   int64 gold = 6;
   int64 diamond = 7;
+  int32 server_id = 8;
+  string nickname = 9;
+  int32 main_progress = 10;
+  int64 fight_power = 11;
+}
+
+message CurrencyBalance {
+  string currency_type = 1;
+  int64 amount = 2;
+}
+
+message RoleSummary {
+  int32 role_id = 1;
+  int32 level = 2;
+  int32 star = 3;
 }
 
 message PlayerState {
   PlayerProfile profile = 1;
   repeated PlayerDungeonProgress dungeon_progress = 2;
+  repeated CurrencyBalance currencies = 3;
+  repeated RoleSummary role_summaries = 4;
 }
 
 message Reward {
@@ -88,6 +105,53 @@ message LoadPlayerResponse {
   reserved 2 to 5;
   PlayerState player_state = 6;
   bool loaded_from_cache = 7;
+}
+
+message EnterBattleRequest {
+  RequestContext context = 1;
+  int64 player_id = 2;
+  int32 stage_id = 3;
+  string mode = 4;
+  int32 loadout_id = 5;
+}
+
+message EnterBattleResponse {
+  ResponseContext context = 1;
+  reserved 2 to 5;
+  int64 session_id = 6;
+  int32 remain_stamina = 7;
+  int64 seed = 8;
+}
+
+message SettleBattleRequest {
+  RequestContext context = 1;
+  int64 player_id = 2;
+  int64 session_id = 3;
+  int32 stage_id = 4;
+  int32 star = 5;
+  int32 result_code = 6;
+  int64 client_score = 7;
+}
+
+message SettleBattleResponse {
+  ResponseContext context = 1;
+  reserved 2 to 5;
+  int64 reward_grant_id = 6;
+  int32 grant_status = 7;
+  repeated Reward reward_preview = 8;
+}
+
+message GetRewardGrantStatusRequest {
+  RequestContext context = 1;
+  int64 player_id = 2;
+  int64 reward_grant_id = 3;
+}
+
+message GetRewardGrantStatusResponse {
+  ResponseContext context = 1;
+  int64 reward_grant_id = 2;
+  int32 grant_status = 3;
+  repeated Reward granted_rewards = 4;
 }
 
 message EnterDungeonRequest {

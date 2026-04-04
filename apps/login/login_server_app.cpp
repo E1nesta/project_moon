@@ -43,20 +43,27 @@ LoginServerApp::LoginServerApp()
     : framework::service::ServiceApp("login_server", "configs/login_server.conf") {}
 
 bool LoginServerApp::BuildDependencies(std::string* error_message) {
-    mysql_pool_ = std::make_unique<common::mysql::MySqlClientPool>(
-        common::mysql::ReadConnectionOptions(Config()),
-        static_cast<std::size_t>(Config().GetInt("storage.mysql.pool_size", 4)));
+    account_mysql_pool_ = std::make_unique<common::mysql::MySqlClientPool>(
+        common::mysql::ReadConnectionOptions(Config(), "storage.account.mysql."),
+        static_cast<std::size_t>(Config().GetInt("storage.account.mysql.pool_size", 4)));
+    player_mysql_pool_ = std::make_unique<common::mysql::MySqlClientPool>(
+        common::mysql::ReadConnectionOptions(Config(), "storage.player.mysql."),
+        static_cast<std::size_t>(Config().GetInt("storage.player.mysql.pool_size", 4)));
     redis_pool_ = std::make_unique<common::redis::RedisClientPool>(
-        common::redis::ReadConnectionOptions(Config()),
-        static_cast<std::size_t>(Config().GetInt("storage.redis.pool_size", 4)));
-    if (!mysql_pool_->Initialize(error_message)) {
+        common::redis::ReadConnectionOptions(Config(), "storage.account.redis."),
+        static_cast<std::size_t>(Config().GetInt("storage.account.redis.pool_size", 4)));
+    if (!account_mysql_pool_->Initialize(error_message)) {
+        return false;
+    }
+    if (!player_mysql_pool_->Initialize(error_message)) {
         return false;
     }
     if (!redis_pool_->Initialize(error_message)) {
         return false;
     }
 
-    account_repository_ = std::make_unique<login_server::auth::MySqlAccountRepository>(*mysql_pool_);
+    account_repository_ =
+        std::make_unique<login_server::auth::MySqlAccountRepository>(*account_mysql_pool_, *player_mysql_pool_);
     session_repository_ = std::make_unique<common::session::RedisSessionStore>(
         *redis_pool_, Config().GetInt("storage.session.ttl_seconds", 3600));
     login_service_ = std::make_unique<login_server::LoginService>(*account_repository_, *session_repository_);

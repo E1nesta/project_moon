@@ -15,11 +15,11 @@ public:
     RedisBattleContextRepository(common::redis::RedisClientPool& redis_pool, int ttl_seconds);
 
     bool Save(const common::model::BattleContext& battle_context) override;
-    [[nodiscard]] std::optional<common::model::BattleContext> FindByBattleId(const std::string& battle_id) const override;
-    bool Delete(const std::string& battle_id) override;
+    [[nodiscard]] std::optional<common::model::BattleContext> FindByBattleId(std::int64_t session_id) const override;
+    bool Delete(std::int64_t session_id) override;
 
 private:
-    [[nodiscard]] static std::string CacheKey(const std::string& battle_id);
+    [[nodiscard]] static std::string CacheKey(std::int64_t session_id);
 
     common::redis::RedisClientPool& redis_pool_;
     int ttl_seconds_ = 3600;

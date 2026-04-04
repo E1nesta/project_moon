@@ -32,22 +32,33 @@ bool ExtractPlayerIdFromBody(common::net::MessageId message_id,
         *player_id = request.player_id();
         return true;
     }
-    case common::net::MessageId::kEnterDungeonRequest: {
-        game_backend::proto::EnterDungeonRequest request;
+    case common::net::MessageId::kEnterBattleRequest: {
+        game_backend::proto::EnterBattleRequest request;
         if (!common::net::ParseMessage(packet.body, &request)) {
             if (error_message != nullptr) {
-                *error_message = "invalid enter dungeon request";
+                *error_message = "invalid enter battle request";
             }
             return false;
         }
         *player_id = request.player_id();
         return true;
     }
-    case common::net::MessageId::kSettleDungeonRequest: {
-        game_backend::proto::SettleDungeonRequest request;
+    case common::net::MessageId::kSettleBattleRequest: {
+        game_backend::proto::SettleBattleRequest request;
         if (!common::net::ParseMessage(packet.body, &request)) {
             if (error_message != nullptr) {
-                *error_message = "invalid settle dungeon request";
+                *error_message = "invalid settle battle request";
+            }
+            return false;
+        }
+        *player_id = request.player_id();
+        return true;
+    }
+    case common::net::MessageId::kGetRewardGrantStatusRequest: {
+        game_backend::proto::GetRewardGrantStatusRequest request;
+        if (!common::net::ParseMessage(packet.body, &request)) {
+            if (error_message != nullptr) {
+                *error_message = "invalid get reward grant status request";
             }
             return false;
         }

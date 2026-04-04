@@ -97,11 +97,11 @@ int PlayerInternalGrpcServerApp::Main(int argc, char* argv[]) {
 
 bool PlayerInternalGrpcServerApp::BuildDependencies(std::string* error_message) {
     mysql_pool_ = std::make_unique<common::mysql::MySqlClientPool>(
-        common::mysql::ReadConnectionOptions(config_),
-        static_cast<std::size_t>(config_.GetInt("storage.mysql.pool_size", 4)));
+        common::mysql::ReadConnectionOptions(config_, "storage.player.mysql."),
+        static_cast<std::size_t>(config_.GetInt("storage.player.mysql.pool_size", 4)));
     redis_pool_ = std::make_unique<common::redis::RedisClientPool>(
-        common::redis::ReadConnectionOptions(config_),
-        static_cast<std::size_t>(config_.GetInt("storage.redis.pool_size", 4)));
+        common::redis::ReadConnectionOptions(config_, "storage.player.redis."),
+        static_cast<std::size_t>(config_.GetInt("storage.player.redis.pool_size", 4)));
     if (!mysql_pool_->Initialize(error_message)) {
         return false;
     }

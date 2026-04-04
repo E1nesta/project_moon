@@ -17,6 +17,7 @@ InMemoryAccountRepository InMemoryAccountRepository::FromConfig(const common::co
     }
     account.default_player_id = config.GetInt("demo.default_player_id", 20001);
     account.enabled = true;
+    account.realname_verified = true;
     return InMemoryAccountRepository(account);
 }
 
@@ -26,6 +27,25 @@ std::optional<common::model::Account> InMemoryAccountRepository::FindByName(cons
         return std::nullopt;
     }
     return iter->second;
+}
+
+bool InMemoryAccountRepository::RecordLoginAudit(std::int64_t /*account_id*/,
+                                                 bool /*success*/,
+                                                 const std::string& /*trace_id*/,
+                                                 std::string* /*error_message*/) {
+    return true;
+}
+
+bool InMemoryAccountRepository::UpdateLastLoginTime(std::int64_t account_id, std::string* error_message) {
+    for (auto& [name, account] : accounts_) {
+        if (account.account_id == account_id) {
+            return true;
+        }
+    }
+    if (error_message != nullptr) {
+        *error_message = "account not found";
+    }
+    return false;
 }
 
 InMemoryAccountRepository::InMemoryAccountRepository(common::model::Account account) {

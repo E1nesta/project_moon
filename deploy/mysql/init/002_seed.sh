@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-set -euo pipefail
 
 mysql --protocol=socket -uroot -p"${MYSQL_ROOT_PASSWORD}" "${MYSQL_DATABASE}" <<SQL
 INSERT INTO account (account_id, account_name, password_hash)

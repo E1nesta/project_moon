@@ -16,6 +16,26 @@ public:
     ::grpc::Status InvalidatePlayerCache(::grpc::ServerContext* context,
                                          const game_backend::internal::player::InvalidatePlayerCacheRequest* request,
                                          game_backend::internal::player::InvalidatePlayerCacheResponse* response) override;
+    ::grpc::Status GetBattleEntrySnapshot(::grpc::ServerContext* context,
+                                          const game_backend::internal::player::GetBattleEntrySnapshotRequest* request,
+                                          game_backend::internal::player::GetBattleEntrySnapshotResponse* response) override;
+    ::grpc::Status PrepareBattleEntry(::grpc::ServerContext* context,
+                                      const game_backend::internal::player::PrepareBattleEntryRequest* request,
+                                      game_backend::internal::player::PrepareBattleEntryResponse* response) override;
+    ::grpc::Status CancelBattleEntry(::grpc::ServerContext* context,
+                                     const game_backend::internal::player::CancelBattleEntryRequest* request,
+                                     game_backend::internal::player::CancelBattleEntryResponse* response) override;
+    ::grpc::Status ApplyRewardGrant(::grpc::ServerContext* context,
+                                    const game_backend::internal::player::ApplyRewardGrantRequest* request,
+                                    game_backend::internal::player::ApplyRewardGrantResponse* response) override;
+    ::grpc::Status SpendStaminaForDungeonEnter(
+        ::grpc::ServerContext* context,
+        const game_backend::internal::player::SpendStaminaForDungeonEnterRequest* request,
+        game_backend::internal::player::SpendStaminaForDungeonEnterResponse* response) override;
+    ::grpc::Status ApplyDungeonSettlement(
+        ::grpc::ServerContext* context,
+        const game_backend::internal::player::ApplyDungeonSettlementRequest* request,
+        game_backend::internal::player::ApplyDungeonSettlementResponse* response) override;
 
 private:
     PlayerService& player_service_;

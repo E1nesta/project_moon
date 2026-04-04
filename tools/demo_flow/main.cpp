@@ -47,6 +47,33 @@ public:
         return player_service_.InvalidatePlayerCache(player_id).success;
     }
 
+    dungeon_server::dungeon::SpendStaminaResponse SpendStaminaForDungeonEnter(std::int64_t player_id,
+                                                                              const std::string& battle_id,
+                                                                              int stamina_cost) override {
+        const auto response = player_service_.SpendStaminaForDungeonEnter(player_id, battle_id, stamina_cost);
+        return {response.success, response.error_code, response.error_message, response.remain_stamina};
+    }
+
+    dungeon_server::dungeon::ApplySettlementResponse ApplyDungeonSettlement(std::int64_t player_id,
+                                                                            const std::string& battle_id,
+                                                                            int dungeon_id,
+                                                                            int star,
+                                                                            std::int64_t normal_gold_reward,
+                                                                            std::int64_t first_clear_diamond_reward) override {
+        const auto response = player_service_.ApplyDungeonSettlement(
+            player_id, battle_id, dungeon_id, star, normal_gold_reward, first_clear_diamond_reward);
+        dungeon_server::dungeon::ApplySettlementResponse result;
+        result.success = response.success;
+        result.error_code = response.error_code;
+        result.error_message = response.error_message;
+        result.first_clear = response.first_clear;
+        result.rewards.push_back({"gold", response.gold_reward});
+        if (response.diamond_reward > 0) {
+            result.rewards.push_back({"diamond", response.diamond_reward});
+        }
+        return result;
+    }
+
 private:
     game_server::player::PlayerService& player_service_;
 };
@@ -362,9 +389,10 @@ int main(int argc, char* argv[]) {
                                            dungeon_id,
                                            3,
                                            true});
-        if (!Require(!duplicate_settle.success &&
-                         duplicate_settle.error_code == common::error::ErrorCode::kBattleAlreadySettled,
-                     "duplicate settlement should be rejected")) {
+        if (!Require(duplicate_settle.success &&
+                         duplicate_settle.first_clear == settle_response.first_clear &&
+                         duplicate_settle.rewards.size() == settle_response.rewards.size(),
+                     "duplicate settlement should replay the original result")) {
             return 1;
         }
 

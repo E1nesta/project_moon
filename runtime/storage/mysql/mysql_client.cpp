@@ -7,13 +7,17 @@
 namespace common::mysql {
 
 ConnectionOptions ReadConnectionOptions(const config::SimpleConfig& config) {
+    return ReadConnectionOptions(config, "storage.mysql.");
+}
+
+ConnectionOptions ReadConnectionOptions(const config::SimpleConfig& config, const std::string& prefix) {
     ConnectionOptions options;
-    options.host = config.GetString("storage.mysql.host", options.host);
-    options.port = config.GetInt("storage.mysql.port", options.port);
-    options.user = config.GetString("storage.mysql.user", options.user);
-    options.password = config.GetString("storage.mysql.password", options.password);
-    options.database = config.GetString("storage.mysql.database", options.database);
-    options.charset = config.GetString("storage.mysql.charset", options.charset);
+    options.host = config.GetString(prefix + "host", options.host);
+    options.port = config.GetInt(prefix + "port", options.port);
+    options.user = config.GetString(prefix + "user", options.user);
+    options.password = config.GetString(prefix + "password", options.password);
+    options.database = config.GetString(prefix + "database", options.database);
+    options.charset = config.GetString(prefix + "charset", options.charset);
     return options;
 }
 

@@ -17,36 +17,83 @@ enum class DungeonRepositoryError {
     kStaminaNotEnough,
     kUnfinishedBattleExists,
     kBattleAlreadySettled,
+    kGrantNotFound,
 };
 
-struct EnterDungeonResult {
+struct EnterBattleResult {
     bool success = false;
-    int remain_stamina = 0;
     DungeonRepositoryError error = DungeonRepositoryError::kNone;
     std::string error_message;
     common::model::BattleContext battle_context;
 };
 
-struct SettleDungeonResult {
+struct SettleBattleResult {
     bool success = false;
-    bool first_clear = false;
     DungeonRepositoryError error = DungeonRepositoryError::kNone;
     std::string error_message;
+};
+
+struct RewardGrantStatusResult {
+    bool success = false;
+    int grant_status = 0;
     std::vector<common::model::Reward> rewards;
+    DungeonRepositoryError error = DungeonRepositoryError::kNone;
+    std::string error_message;
+};
+
+struct BattleOutboxEvent {
+    std::int64_t event_id = 0;
+    std::int64_t session_id = 0;
+    std::int64_t player_id = 0;
+    std::int64_t reward_grant_id = 0;
+    std::string payload_json;
+    std::string reward_json;
+    std::string idempotency_key;
+    std::string trace_id;
+    int publish_status = 0;
+    int retry_count = 0;
 };
 
 class DungeonRepository {
 public:
     virtual ~DungeonRepository() = default;
 
-    [[nodiscard]] virtual std::optional<common::model::BattleContext> FindBattleById(
-        const std::string& battle_id) const = 0;
-    [[nodiscard]] virtual EnterDungeonResult EnterDungeon(const PlayerSnapshot& player_snapshot,
-                                                          const DungeonConfig& dungeon_config,
-                                                          const std::string& battle_id) = 0;
-    [[nodiscard]] virtual SettleDungeonResult SettleDungeon(const common::model::BattleContext& battle_context,
-                                                            const DungeonConfig& dungeon_config,
-                                                            int star) = 0;
+    [[nodiscard]] virtual std::optional<common::model::BattleContext> FindBattleById(std::int64_t session_id) const = 0;
+    [[nodiscard]] virtual std::optional<common::model::BattleContext> FindUnsettledBattleByPlayerId(
+        std::int64_t player_id) const = 0;
+    [[nodiscard]] virtual EnterBattleResult CreateBattleSession(std::int64_t session_id,
+                                                                std::int64_t player_id,
+                                                                int stage_id,
+                                                                const std::string& mode,
+                                                                int cost_energy,
+                                                                int remain_energy_after,
+                                                                const std::vector<common::model::PlayerRoleSummary>& role_summaries,
+                                                                std::int64_t seed,
+                                                                const std::string& idempotency_key,
+                                                                const std::string& trace_id) = 0;
+    virtual bool CancelBattleSession(std::int64_t session_id, std::string* error_message = nullptr) = 0;
+    [[nodiscard]] virtual SettleBattleResult RecordBattleSettlement(std::int64_t session_id,
+                                                                    std::int64_t player_id,
+                                                                    int stage_id,
+                                                                    int result_code,
+                                                                    int star,
+                                                                    std::int64_t client_score,
+                                                                    std::int64_t reward_grant_id,
+                                                                    const std::vector<common::model::Reward>& rewards,
+                                                                    const std::string& idempotency_key,
+                                                                    const std::string& trace_id) = 0;
+    [[nodiscard]] virtual RewardGrantStatusResult GetRewardGrantStatus(std::int64_t reward_grant_id) const = 0;
+    [[nodiscard]] virtual std::vector<BattleOutboxEvent> LoadPublishableOutboxEvents(std::size_t limit) = 0;
+    virtual bool MarkOutboxPublished(std::int64_t event_id, std::string* error_message = nullptr) = 0;
+    [[nodiscard]] virtual std::vector<BattleOutboxEvent> LoadConsumableOutboxEvents(std::size_t limit) = 0;
+    [[nodiscard]] virtual std::optional<BattleOutboxEvent> FindOutboxEventById(std::int64_t event_id) const = 0;
+    virtual bool ScheduleOutboxRetry(std::int64_t event_id, std::string* error_message = nullptr) = 0;
+    virtual bool MarkRewardGrantDone(std::int64_t reward_grant_id,
+                                     const std::vector<common::model::Reward>& rewards,
+                                     std::string* error_message = nullptr) = 0;
+    virtual bool MarkRewardGrantFailed(std::int64_t reward_grant_id,
+                                       std::string* error_message = nullptr) = 0;
+    virtual bool MarkOutboxConsumed(std::int64_t event_id, std::string* error_message = nullptr) = 0;
 };
 
 }  // namespace dungeon_server::dungeon

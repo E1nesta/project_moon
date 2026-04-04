@@ -20,6 +20,7 @@ struct ConnectionOptions {
 };
 
 ConnectionOptions ReadConnectionOptions(const config::SimpleConfig& config);
+ConnectionOptions ReadConnectionOptions(const config::SimpleConfig& config, const std::string& prefix);
 
 class RedisClient {
 public:

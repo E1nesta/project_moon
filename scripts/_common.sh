@@ -5,7 +5,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DEPLOY_PROFILE="${DEPLOY_PROFILE:-demo}"
 
 configure_preset() {
-  printf '%s\n' "${CMAKE_CONFIGURE_PRESET:-grpc-stack-debug}"
+  printf '%s\n' "${CMAKE_CONFIGURE_PRESET:-dev-debug}"
 }
 
 build_preset() {
@@ -16,41 +16,23 @@ build_dir() {
   printf '%s\n' "$ROOT_DIR/build/$(configure_preset)"
 }
 
-export_grpc_stack_env() {
-  local grpc_stack_root="${GRPC_STACK_ROOT:-$HOME/.local/toolchains/grpc-stack}"
-  export GRPC_STACK_ROOT="$grpc_stack_root"
-  export PATH="$grpc_stack_root/bin:$PATH"
-
-  if [[ -n "${CMAKE_PREFIX_PATH:-}" ]]; then
-    export CMAKE_PREFIX_PATH="$grpc_stack_root:$CMAKE_PREFIX_PATH"
-  else
-    export CMAKE_PREFIX_PATH="$grpc_stack_root"
-  fi
-
-  if [[ -n "${PKG_CONFIG_PATH:-}" ]]; then
-    export PKG_CONFIG_PATH="$grpc_stack_root/lib/pkgconfig:$PKG_CONFIG_PATH"
-  else
-    export PKG_CONFIG_PATH="$grpc_stack_root/lib/pkgconfig"
-  fi
+has_system_grpc_toolchain() {
+  command -v protoc >/dev/null 2>&1 &&
+  command -v grpc_cpp_plugin >/dev/null 2>&1
 }
 
-ensure_grpc_stack() {
-  export_grpc_stack_env
-  if [[ -x "$GRPC_STACK_ROOT/bin/protoc" && -x "$GRPC_STACK_ROOT/bin/grpc_cpp_plugin" ]]; then
+prepare_grpc_toolchain() {
+  if has_system_grpc_toolchain; then
     return 0
   fi
 
-  if pgrep -f "$ROOT_DIR/scripts/setup_grpc_stack.sh" >/dev/null 2>&1; then
-    echo "waiting for existing gRPC stack build to finish..."
-    while pgrep -f "$ROOT_DIR/scripts/setup_grpc_stack.sh" >/dev/null 2>&1; do
-      sleep 5
-    done
-    if [[ -x "$GRPC_STACK_ROOT/bin/protoc" && -x "$GRPC_STACK_ROOT/bin/grpc_cpp_plugin" ]]; then
-      return 0
-    fi
-  fi
+  cat <<'EOF' >&2
+missing gRPC/Protobuf toolchain
 
-  "$ROOT_DIR/scripts/setup_grpc_stack.sh"
+Install system packages such as:
+  protobuf-compiler libprotobuf-dev libgrpc++-dev protobuf-compiler-grpc
+EOF
+  return 1
 }
 
 compose_file() {
@@ -82,7 +64,7 @@ build_local_binaries() {
     return 0
   fi
 
-  ensure_grpc_stack
+  prepare_grpc_toolchain
   (
     cd "$ROOT_DIR"
     cmake --preset "$(configure_preset)"

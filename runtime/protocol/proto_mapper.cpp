@@ -245,19 +245,28 @@ bool RewriteRequestContext(MessageId message_id, const RequestContext& context, 
                 FillProto(context, proto_context);
             });
     }
-    case MessageId::kEnterDungeonRequest: {
-        return RewriteProtoRequest<game_backend::proto::EnterDungeonRequest>(
+    case MessageId::kEnterBattleRequest: {
+        return RewriteProtoRequest<game_backend::proto::EnterBattleRequest>(
             message_id,
             packet,
-            [&context](game_backend::proto::RequestContext* proto_context, game_backend::proto::EnterDungeonRequest*) {
+            [&context](game_backend::proto::RequestContext* proto_context, game_backend::proto::EnterBattleRequest*) {
                 FillProto(context, proto_context);
             });
     }
-    case MessageId::kSettleDungeonRequest: {
-        return RewriteProtoRequest<game_backend::proto::SettleDungeonRequest>(
+    case MessageId::kSettleBattleRequest: {
+        return RewriteProtoRequest<game_backend::proto::SettleBattleRequest>(
             message_id,
             packet,
-            [&context](game_backend::proto::RequestContext* proto_context, game_backend::proto::SettleDungeonRequest*) {
+            [&context](game_backend::proto::RequestContext* proto_context, game_backend::proto::SettleBattleRequest*) {
+                FillProto(context, proto_context);
+            });
+    }
+    case MessageId::kGetRewardGrantStatusRequest: {
+        return RewriteProtoRequest<game_backend::proto::GetRewardGrantStatusRequest>(
+            message_id,
+            packet,
+            [&context](game_backend::proto::RequestContext* proto_context,
+                       game_backend::proto::GetRewardGrantStatusRequest*) {
                 FillProto(context, proto_context);
             });
     }
@@ -285,11 +294,14 @@ bool SignTrustedRequest(MessageId message_id,
     case MessageId::kLoadPlayerRequest:
         return SignProtoRequest<game_backend::proto::LoadPlayerRequest>(
             message_id, gateway_timestamp_ms, shared_secret, packet, error_message);
-    case MessageId::kEnterDungeonRequest:
-        return SignProtoRequest<game_backend::proto::EnterDungeonRequest>(
+    case MessageId::kEnterBattleRequest:
+        return SignProtoRequest<game_backend::proto::EnterBattleRequest>(
             message_id, gateway_timestamp_ms, shared_secret, packet, error_message);
-    case MessageId::kSettleDungeonRequest:
-        return SignProtoRequest<game_backend::proto::SettleDungeonRequest>(
+    case MessageId::kSettleBattleRequest:
+        return SignProtoRequest<game_backend::proto::SettleBattleRequest>(
+            message_id, gateway_timestamp_ms, shared_secret, packet, error_message);
+    case MessageId::kGetRewardGrantStatusRequest:
+        return SignProtoRequest<game_backend::proto::GetRewardGrantStatusRequest>(
             message_id, gateway_timestamp_ms, shared_secret, packet, error_message);
     default:
         if (error_message != nullptr) {
@@ -311,11 +323,14 @@ bool ValidateTrustedRequest(MessageId message_id,
     case MessageId::kLoadPlayerRequest:
         return ValidateProtoRequest<game_backend::proto::LoadPlayerRequest>(
             message_id, max_clock_skew_ms, shared_secret, packet, error_message);
-    case MessageId::kEnterDungeonRequest:
-        return ValidateProtoRequest<game_backend::proto::EnterDungeonRequest>(
+    case MessageId::kEnterBattleRequest:
+        return ValidateProtoRequest<game_backend::proto::EnterBattleRequest>(
             message_id, max_clock_skew_ms, shared_secret, packet, error_message);
-    case MessageId::kSettleDungeonRequest:
-        return ValidateProtoRequest<game_backend::proto::SettleDungeonRequest>(
+    case MessageId::kSettleBattleRequest:
+        return ValidateProtoRequest<game_backend::proto::SettleBattleRequest>(
+            message_id, max_clock_skew_ms, shared_secret, packet, error_message);
+    case MessageId::kGetRewardGrantStatusRequest:
+        return ValidateProtoRequest<game_backend::proto::GetRewardGrantStatusRequest>(
             message_id, max_clock_skew_ms, shared_secret, packet, error_message);
     default:
         if (error_message != nullptr) {
@@ -361,12 +376,16 @@ bool ExtractRequestContext(MessageId message_id, const std::string& body, Reques
         game_backend::proto::LoadPlayerRequest request;
         return ParseMessage(body, &request) && (*context = FromProto(request.context()), true);
     }
-    case MessageId::kEnterDungeonRequest: {
-        game_backend::proto::EnterDungeonRequest request;
+    case MessageId::kEnterBattleRequest: {
+        game_backend::proto::EnterBattleRequest request;
         return ParseMessage(body, &request) && (*context = FromProto(request.context()), true);
     }
-    case MessageId::kSettleDungeonRequest: {
-        game_backend::proto::SettleDungeonRequest request;
+    case MessageId::kSettleBattleRequest: {
+        game_backend::proto::SettleBattleRequest request;
+        return ParseMessage(body, &request) && (*context = FromProto(request.context()), true);
+    }
+    case MessageId::kGetRewardGrantStatusRequest: {
+        game_backend::proto::GetRewardGrantStatusRequest request;
         return ParseMessage(body, &request) && (*context = FromProto(request.context()), true);
     }
     default:

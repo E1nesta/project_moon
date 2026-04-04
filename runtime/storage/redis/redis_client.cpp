@@ -7,12 +7,16 @@
 namespace common::redis {
 
 ConnectionOptions ReadConnectionOptions(const config::SimpleConfig& config) {
+    return ReadConnectionOptions(config, "storage.redis.");
+}
+
+ConnectionOptions ReadConnectionOptions(const config::SimpleConfig& config, const std::string& prefix) {
     ConnectionOptions options;
-    options.host = config.GetString("storage.redis.host", options.host);
-    options.port = config.GetInt("storage.redis.port", options.port);
-    options.password = config.GetString("storage.redis.password", options.password);
-    options.database = config.GetInt("storage.redis.database", options.database);
-    options.timeout_ms = config.GetInt("storage.redis.timeout_ms", options.timeout_ms);
+    options.host = config.GetString(prefix + "host", options.host);
+    options.port = config.GetInt(prefix + "port", options.port);
+    options.password = config.GetString(prefix + "password", options.password);
+    options.database = config.GetInt(prefix + "database", options.database);
+    options.timeout_ms = config.GetInt(prefix + "timeout_ms", options.timeout_ms);
     return options;
 }
 

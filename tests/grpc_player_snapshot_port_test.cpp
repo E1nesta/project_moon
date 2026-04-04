@@ -112,6 +112,28 @@ int main() {
         return 1;
     }
 
+    const auto spend_stamina = port.SpendStaminaForDungeonEnter(20001, "battle-20001-1001-1", 10);
+    if (!Expect(spend_stamina.success && spend_stamina.remain_stamina == 110,
+                "expected grpc spend stamina mapping to succeed")) {
+        server_runner.Shutdown();
+        return 1;
+    }
+
+    const auto spend_stamina_failure = port.SpendStaminaForDungeonEnter(20001, "battle-20001-1001-2", 999);
+    if (!Expect(!spend_stamina_failure.success &&
+                    spend_stamina_failure.error_code == common::error::ErrorCode::kStaminaNotEnough,
+                "expected grpc spend stamina failure mapping")) {
+        server_runner.Shutdown();
+        return 1;
+    }
+
+    const auto settlement = port.ApplyDungeonSettlement(20001, "battle-20001-1001-1", 1001, 3, 100, 50);
+    if (!Expect(settlement.success && settlement.first_clear && settlement.rewards.size() == 2,
+                "expected grpc settlement mapping to succeed")) {
+        server_runner.Shutdown();
+        return 1;
+    }
+
     const auto unavailable_port_number = server_runner.Port();
     server_runner.Shutdown();
 
@@ -120,6 +142,10 @@ int main() {
         framework::grpc::CreateInsecureChannel(unavailable_config, "grpc.client.player_internal."));
     if (!Expect(!unavailable_port.InvalidatePlayerSnapshot(20001),
                 "expected grpc invalidation failures to map to false")) {
+        return 1;
+    }
+    if (!Expect(!unavailable_port.SpendStaminaForDungeonEnter(20001, "battle-20001-1001-9", 10).success,
+                "expected grpc spend failures to map to false")) {
         return 1;
     }
 

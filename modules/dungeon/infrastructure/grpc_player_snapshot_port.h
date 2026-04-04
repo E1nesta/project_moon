@@ -13,8 +13,21 @@ class GrpcPlayerSnapshotPort final : public PlayerSnapshotPort {
 public:
     explicit GrpcPlayerSnapshotPort(std::shared_ptr<::grpc::Channel> channel);
 
-    [[nodiscard]] std::optional<PlayerSnapshot> LoadPlayerSnapshot(std::int64_t player_id) const override;
+    [[nodiscard]] std::optional<PlayerSnapshot> GetBattleEntrySnapshot(std::int64_t player_id) const override;
     bool InvalidatePlayerSnapshot(std::int64_t player_id) override;
+    [[nodiscard]] PrepareBattleEntryPortResponse PrepareBattleEntry(std::int64_t player_id,
+                                                                    std::int64_t session_id,
+                                                                    int energy_cost,
+                                                                    const std::string& idempotency_key) override;
+    [[nodiscard]] CancelBattleEntryPortResponse CancelBattleEntry(std::int64_t player_id,
+                                                                  std::int64_t session_id,
+                                                                  int energy_refund,
+                                                                  const std::string& idempotency_key) override;
+    [[nodiscard]] ApplyRewardGrantPortResponse ApplyRewardGrant(std::int64_t player_id,
+                                                                std::int64_t grant_id,
+                                                                std::int64_t session_id,
+                                                                const std::vector<common::model::Reward>& rewards,
+                                                                const std::string& idempotency_key) override;
 
 private:
     std::unique_ptr<game_backend::internal::player::PlayerInternal::Stub> stub_;

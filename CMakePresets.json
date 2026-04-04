@@ -7,44 +7,42 @@
   },
   "configurePresets": [
     {
-      "name": "grpc-stack-debug",
-      "displayName": "gRPC Stack Debug",
+      "name": "dev-debug",
+      "displayName": "Development Debug",
       "generator": "Ninja",
-      "binaryDir": "${sourceDir}/build/grpc-stack-debug",
+      "binaryDir": "${sourceDir}/build/dev-debug",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
         "CMAKE_C_COMPILER_LAUNCHER": "ccache",
-        "CMAKE_CXX_COMPILER_LAUNCHER": "ccache",
-        "GRPC_STACK_ROOT": "$env{HOME}/.local/toolchains/grpc-stack"
+        "CMAKE_CXX_COMPILER_LAUNCHER": "ccache"
       }
     },
     {
-      "name": "grpc-stack-release",
-      "displayName": "gRPC Stack Release",
+      "name": "dev-release",
+      "displayName": "Development Release",
       "generator": "Ninja",
-      "binaryDir": "${sourceDir}/build/grpc-stack-release",
+      "binaryDir": "${sourceDir}/build/dev-release",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
         "CMAKE_C_COMPILER_LAUNCHER": "ccache",
-        "CMAKE_CXX_COMPILER_LAUNCHER": "ccache",
-        "GRPC_STACK_ROOT": "$env{HOME}/.local/toolchains/grpc-stack"
+        "CMAKE_CXX_COMPILER_LAUNCHER": "ccache"
       }
     }
   ],
   "buildPresets": [
     {
-      "name": "grpc-stack-debug",
-      "configurePreset": "grpc-stack-debug"
+      "name": "dev-debug",
+      "configurePreset": "dev-debug"
     },
     {
-      "name": "grpc-stack-release",
-      "configurePreset": "grpc-stack-release"
+      "name": "dev-release",
+      "configurePreset": "dev-release"
     }
   ],
   "testPresets": [
     {
-      "name": "grpc-stack-debug",
-      "configurePreset": "grpc-stack-debug",
+      "name": "dev-debug",
+      "configurePreset": "dev-debug",
       "output": {
         "outputOnFailure": true
       }

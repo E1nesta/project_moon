@@ -2,6 +2,7 @@
 
 #include "modules/dungeon/domain/battle_context.h"
 
+#include <cstdint>
 #include <optional>
 #include <string>
 
@@ -13,8 +14,8 @@ public:
     virtual ~BattleContextRepository() = default;
 
     virtual bool Save(const common::model::BattleContext& battle_context) = 0;
-    [[nodiscard]] virtual std::optional<common::model::BattleContext> FindByBattleId(const std::string& battle_id) const = 0;
-    virtual bool Delete(const std::string& battle_id) = 0;
+    [[nodiscard]] virtual std::optional<common::model::BattleContext> FindByBattleId(std::int64_t session_id) const = 0;
+    virtual bool Delete(std::int64_t session_id) = 0;
 };
 
 }  // namespace dungeon_server::dungeon

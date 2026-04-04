@@ -46,6 +46,12 @@ std::optional<LoginResponse> LoginService::ValidateAccount(const common::model::
     if (!account.enabled) {
         return BuildLoginError(common::error::ErrorCode::kAccountDisabled, "account disabled");
     }
+    if (account.login_banned) {
+        return BuildLoginError(common::error::ErrorCode::kAccountDisabled, "account login banned");
+    }
+    if (!account.realname_verified) {
+        return BuildLoginError(common::error::ErrorCode::kAccountDisabled, "account realname not verified");
+    }
 
     if (!common::security::PasswordHasher::VerifyPassword(password, account.password_hash)) {
         return BuildLoginError(common::error::ErrorCode::kInvalidPassword, "invalid password");
@@ -55,8 +61,11 @@ std::optional<LoginResponse> LoginService::ValidateAccount(const common::model::
 }
 
 LoginResponse LoginService::BuildSuccessResponse(const common::model::Account& account) const {
-    return BuildLoginSuccess(
-        session_repository_.Create(account.account_id, account.default_player_id), account.default_player_id);
+    std::string error_message;
+    account_repository_.RecordLoginAudit(account.account_id, true, account.account_name, &error_message);
+    account_repository_.UpdateLastLoginTime(account.account_id, &error_message);
+    return BuildLoginSuccess(session_repository_.Create(account.account_id, account.default_player_id),
+                             account.default_player_id);
 }
 
 }  // namespace login_server

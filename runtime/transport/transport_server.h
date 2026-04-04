@@ -32,6 +32,8 @@ public:
         TlsOptions tls;
     };
 
+    struct Impl;
+
     TransportServer();
     explicit TransportServer(Options options);
     ~TransportServer();
@@ -50,7 +52,6 @@ private:
 
     void DoAccept();
 
-    struct Impl;
     Impl* impl_ = nullptr;
 };
 

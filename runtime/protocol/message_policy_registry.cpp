@@ -13,10 +13,12 @@ std::optional<MessagePolicy> MessagePolicyRegistry::Find(common::net::MessageId 
         return MessagePolicy{false, false, false, ExecutionKeyKind::kConnection, MessageId::kLoginResponse};
     case MessageId::kLoadPlayerRequest:
         return MessagePolicy{true, true, true, ExecutionKeyKind::kPlayer, MessageId::kLoadPlayerResponse};
-    case MessageId::kEnterDungeonRequest:
-        return MessagePolicy{true, true, true, ExecutionKeyKind::kPlayer, MessageId::kEnterDungeonResponse};
-    case MessageId::kSettleDungeonRequest:
-        return MessagePolicy{true, true, true, ExecutionKeyKind::kPlayer, MessageId::kSettleDungeonResponse};
+    case MessageId::kEnterBattleRequest:
+        return MessagePolicy{true, true, true, ExecutionKeyKind::kPlayer, MessageId::kEnterBattleResponse};
+    case MessageId::kSettleBattleRequest:
+        return MessagePolicy{true, true, true, ExecutionKeyKind::kPlayer, MessageId::kSettleBattleResponse};
+    case MessageId::kGetRewardGrantStatusRequest:
+        return MessagePolicy{true, true, true, ExecutionKeyKind::kPlayer, MessageId::kGetRewardGrantStatusResponse};
     default:
         return std::nullopt;
     }

@@ -8,6 +8,7 @@
 #include "modules/dungeon/infrastructure/mysql_dungeon_repository.h"
 #include "modules/dungeon/infrastructure/redis_battle_context_repository.h"
 #include "modules/dungeon/infrastructure/redis_player_lock_repository.h"
+#include "runtime/mq/rocketmq_client.h"
 #include "runtime/transport/service_app.h"
 
 #include <memory>
@@ -25,12 +26,13 @@ protected:
     bool RequiresTrustedGateway() const override { return true; }
 
 private:
-    // Adapter entrypoint for the enter-dungeon use case.
-    common::net::Packet HandleEnterDungeonRequest(const framework::protocol::HandlerContext& context,
+    void TryPublishSettlementEvent(std::int64_t reward_grant_id) const;
+    common::net::Packet HandleEnterBattleRequest(const framework::protocol::HandlerContext& context,
+                                                 const common::net::Packet& packet) const;
+    common::net::Packet HandleSettleBattleRequest(const framework::protocol::HandlerContext& context,
                                                   const common::net::Packet& packet) const;
-    // Adapter entrypoint for the settle-dungeon use case.
-    common::net::Packet HandleSettleDungeonRequest(const framework::protocol::HandlerContext& context,
-                                                   const common::net::Packet& packet) const;
+    common::net::Packet HandleGetRewardGrantStatusRequest(const framework::protocol::HandlerContext& context,
+                                                          const common::net::Packet& packet) const;
 
     std::unique_ptr<common::mysql::MySqlClientPool> mysql_pool_;
     std::unique_ptr<common::redis::RedisClientPool> redis_pool_;
@@ -39,6 +41,7 @@ private:
     std::unique_ptr<dungeon_server::dungeon::MySqlDungeonRepository> dungeon_repository_;
     std::unique_ptr<dungeon_server::dungeon::RedisBattleContextRepository> battle_context_repository_;
     std::unique_ptr<dungeon_server::dungeon::RedisPlayerLockRepository> player_lock_repository_;
+    std::unique_ptr<common::mq::RocketMqProducer> rocketmq_producer_;
     std::unique_ptr<dungeon_server::dungeon::DungeonService> dungeon_service_;
 };
 

@@ -682,9 +682,16 @@ int main(int argc, char* argv[]) {
                                                        common::net::MessageId::kSettleDungeonRequest,
                                                        BuildContext(request_id++, login_response.auth_token(), login_response.player_id()),
                                                        &duplicate_settle_request);
-        if (!RequireExpectedError(duplicate_settle_call,
-                                  common::error::ErrorCode::kBattleAlreadySettled,
-                                  "duplicate settle request")) {
+        if (!Require(duplicate_settle_call.ok, "duplicate settle request transport failed")) {
+            return 1;
+        }
+        game_backend::proto::SettleDungeonResponse duplicate_settle_response;
+        if (!Require(common::net::ParseMessage(duplicate_settle_call.packet.body, &duplicate_settle_response),
+                     "failed to parse duplicate settle response")) {
+            return 1;
+        }
+        if (!Require(duplicate_settle_response.first_clear() && duplicate_settle_response.rewards_size() == 2,
+                     "duplicate settle request should replay the original settlement response")) {
             return 1;
         }
 

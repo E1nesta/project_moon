@@ -47,6 +47,30 @@ public:
     }
 };
 
+class FailingPlayerRepository final : public game_server::player::PlayerRepository {
+public:
+    std::optional<common::model::PlayerState> LoadPlayerState(std::int64_t /*player_id*/) const override {
+        return std::nullopt;
+    }
+
+    game_server::player::SpendStaminaForDungeonEnterResult SpendStaminaForDungeonEnter(
+        std::int64_t /*player_id*/,
+        const std::string& /*battle_id*/,
+        int /*stamina_cost*/) override {
+        return {false, 0, game_server::player::PlayerMutationError::kStorageFailure, "spend failed"};
+    }
+
+    game_server::player::ApplyDungeonSettlementResult ApplyDungeonSettlement(
+        std::int64_t /*player_id*/,
+        const std::string& /*battle_id*/,
+        int /*dungeon_id*/,
+        int /*star*/,
+        std::int64_t /*normal_gold_reward*/,
+        std::int64_t /*first_clear_diamond_reward*/) override {
+        return {false, false, 0, 0, game_server::player::PlayerMutationError::kStorageFailure, "settlement failed"};
+    }
+};
+
 bool Expect(bool condition, const std::string& message) {
     if (condition) {
         return true;
@@ -146,6 +170,74 @@ int main() {
         const auto status = failing_grpc_service.InvalidatePlayerCache(&context, &request, &response);
         if (!Expect(status.error_code() == grpc::StatusCode::INTERNAL,
                     "expected cache invalidation failures to map to internal")) {
+            return 1;
+        }
+    }
+
+    {
+        grpc::ServerContext context;
+        game_backend::internal::player::SpendStaminaForDungeonEnterRequest request;
+        game_backend::internal::player::SpendStaminaForDungeonEnterResponse response;
+        request.set_player_id(20001);
+        request.set_battle_id("battle-20001-1001-1");
+        request.set_stamina_cost(10);
+        const auto status = grpc_service.SpendStaminaForDungeonEnter(&context, &request, &response);
+        if (!Expect(status.ok() && response.remain_stamina() == 110, "expected spend stamina rpc to succeed")) {
+            return 1;
+        }
+    }
+
+    {
+        grpc::ServerContext context;
+        game_backend::internal::player::SpendStaminaForDungeonEnterRequest request;
+        game_backend::internal::player::SpendStaminaForDungeonEnterResponse response;
+        request.set_player_id(20001);
+        request.set_battle_id("battle-20001-1001-2");
+        request.set_stamina_cost(999);
+        const auto status = grpc_service.SpendStaminaForDungeonEnter(&context, &request, &response);
+        if (!Expect(status.error_code() == grpc::StatusCode::FAILED_PRECONDITION,
+                    "expected stamina error to map to failed precondition")) {
+            return 1;
+        }
+    }
+
+    {
+        grpc::ServerContext context;
+        game_backend::internal::player::ApplyDungeonSettlementRequest request;
+        game_backend::internal::player::ApplyDungeonSettlementResponse response;
+        request.set_player_id(20001);
+        request.set_battle_id("battle-20001-1001-1");
+        request.set_dungeon_id(1001);
+        request.set_star(3);
+        request.set_normal_gold_reward(100);
+        request.set_first_clear_diamond_reward(50);
+        const auto status = grpc_service.ApplyDungeonSettlement(&context, &request, &response);
+        if (!Expect(status.ok(), "expected apply settlement rpc to succeed")) {
+            return 1;
+        }
+        if (!Expect(response.first_clear() && response.rewards_size() == 2,
+                    "expected apply settlement to return first clear rewards")) {
+            return 1;
+        }
+    }
+
+    {
+        FailingPlayerRepository failing_repository;
+        InMemoryPlayerCacheRepository cache;
+        game_server::player::PlayerService failing_service(failing_repository, cache);
+        game_server::player::PlayerInternalServiceImpl failing_grpc_service(failing_service);
+        grpc::ServerContext context;
+        game_backend::internal::player::ApplyDungeonSettlementRequest request;
+        game_backend::internal::player::ApplyDungeonSettlementResponse response;
+        request.set_player_id(20001);
+        request.set_battle_id("battle-20001-1001-9");
+        request.set_dungeon_id(1001);
+        request.set_star(3);
+        request.set_normal_gold_reward(100);
+        request.set_first_clear_diamond_reward(50);
+        const auto status = failing_grpc_service.ApplyDungeonSettlement(&context, &request, &response);
+        if (!Expect(status.error_code() == grpc::StatusCode::INTERNAL,
+                    "expected settlement storage failures to map to internal")) {
             return 1;
         }
     }

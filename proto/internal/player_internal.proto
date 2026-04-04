@@ -5,6 +5,12 @@ package game_backend.internal.player;
 service PlayerInternal {
   rpc GetPlayerSnapshot(GetPlayerSnapshotRequest) returns (GetPlayerSnapshotResponse);
   rpc InvalidatePlayerCache(InvalidatePlayerCacheRequest) returns (InvalidatePlayerCacheResponse);
+  rpc GetBattleEntrySnapshot(GetBattleEntrySnapshotRequest) returns (GetBattleEntrySnapshotResponse);
+  rpc PrepareBattleEntry(PrepareBattleEntryRequest) returns (PrepareBattleEntryResponse);
+  rpc CancelBattleEntry(CancelBattleEntryRequest) returns (CancelBattleEntryResponse);
+  rpc ApplyRewardGrant(ApplyRewardGrantRequest) returns (ApplyRewardGrantResponse);
+  rpc SpendStaminaForDungeonEnter(SpendStaminaForDungeonEnterRequest) returns (SpendStaminaForDungeonEnterResponse);
+  rpc ApplyDungeonSettlement(ApplyDungeonSettlementRequest) returns (ApplyDungeonSettlementResponse);
 }
 
 message GetPlayerSnapshotRequest {
@@ -24,4 +30,85 @@ message InvalidatePlayerCacheRequest {
 
 message InvalidatePlayerCacheResponse {
   bool success = 1;
+}
+
+message GetBattleEntrySnapshotRequest {
+  int64 player_id = 1;
+}
+
+message GetBattleEntrySnapshotResponse {
+  bool found = 1;
+  int64 player_id = 2;
+  int32 level = 3;
+  int32 energy = 4;
+  repeated BattleRoleSummary role_summaries = 5;
+}
+
+message BattleRoleSummary {
+  int32 role_id = 1;
+  int32 level = 2;
+  int32 star = 3;
+}
+
+message PrepareBattleEntryRequest {
+  int64 player_id = 1;
+  int64 session_id = 2;
+  int32 energy_cost = 3;
+  string idempotency_key = 4;
+}
+
+message PrepareBattleEntryResponse {
+  int32 remain_energy = 1;
+}
+
+message CancelBattleEntryRequest {
+  int64 player_id = 1;
+  int64 session_id = 2;
+  int32 energy_refund = 3;
+  string idempotency_key = 4;
+}
+
+message CancelBattleEntryResponse {
+  bool success = 1;
+}
+
+message SpendStaminaForDungeonEnterRequest {
+  int64 player_id = 1;
+  string battle_id = 2;
+  int32 stamina_cost = 3;
+}
+
+message SpendStaminaForDungeonEnterResponse {
+  int32 remain_stamina = 1;
+}
+
+message SettlementReward {
+  string reward_type = 1;
+  int64 amount = 2;
+}
+
+message ApplyRewardGrantRequest {
+  int64 player_id = 1;
+  int64 grant_id = 2;
+  int64 session_id = 3;
+  string idempotency_key = 4;
+  repeated SettlementReward rewards = 5;
+}
+
+message ApplyRewardGrantResponse {
+  repeated SettlementReward rewards = 1;
+}
+
+message ApplyDungeonSettlementRequest {
+  int64 player_id = 1;
+  string battle_id = 2;
+  int32 dungeon_id = 3;
+  int32 star = 4;
+  int64 normal_gold_reward = 5;
+  int64 first_clear_diamond_reward = 6;
+}
+
+message ApplyDungeonSettlementResponse {
+  bool first_clear = 1;
+  repeated SettlementReward rewards = 2;
 }

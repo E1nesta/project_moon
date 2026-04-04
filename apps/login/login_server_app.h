@@ -26,7 +26,8 @@ private:
     common::net::Packet HandleLoginRequest(const framework::protocol::HandlerContext& context,
                                            const common::net::Packet& packet) const;
 
-    std::unique_ptr<common::mysql::MySqlClientPool> mysql_pool_;
+    std::unique_ptr<common::mysql::MySqlClientPool> account_mysql_pool_;
+    std::unique_ptr<common::mysql::MySqlClientPool> player_mysql_pool_;
     std::unique_ptr<common::redis::RedisClientPool> redis_pool_;
     std::unique_ptr<login_server::auth::MySqlAccountRepository> account_repository_;
     std::unique_ptr<common::session::SessionStore> session_repository_;

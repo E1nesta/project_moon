@@ -11,6 +11,8 @@ struct Account {
     std::string password_hash;
     std::int64_t default_player_id = 0;
     bool enabled = true;
+    bool login_banned = false;
+    bool realname_verified = false;
 };
 
 }  // namespace common::model

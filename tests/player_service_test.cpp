@@ -90,5 +90,37 @@ int main() {
         return 1;
     }
 
+    const auto spend_stamina = player_service.SpendStaminaForDungeonEnter(20001, "battle-20001-1001-1", 10);
+    if (!Expect(spend_stamina.success, "expected spend stamina to succeed")) {
+        return 1;
+    }
+    if (!Expect(spend_stamina.remain_stamina == 110, "expected stamina to be reduced")) {
+        return 1;
+    }
+
+    const auto spend_stamina_retry = player_service.SpendStaminaForDungeonEnter(20001, "battle-20001-1001-1", 10);
+    if (!Expect(spend_stamina_retry.success && spend_stamina_retry.remain_stamina == 110,
+                "expected spend stamina retry to be idempotent")) {
+        return 1;
+    }
+
+    const auto settlement =
+        player_service.ApplyDungeonSettlement(20001, "battle-20001-1001-1", 1001, 3, 100, 50);
+    if (!Expect(settlement.success, "expected dungeon settlement to succeed")) {
+        return 1;
+    }
+    if (!Expect(settlement.first_clear && settlement.gold_reward == 100 && settlement.diamond_reward == 50,
+                "expected first-clear settlement rewards")) {
+        return 1;
+    }
+
+    const auto settlement_retry =
+        player_service.ApplyDungeonSettlement(20001, "battle-20001-1001-1", 1001, 3, 100, 50);
+    if (!Expect(settlement_retry.success && settlement_retry.first_clear &&
+                    settlement_retry.gold_reward == 100 && settlement_retry.diamond_reward == 50,
+                "expected settlement retry to be idempotent")) {
+        return 1;
+    }
+
     return 0;
 }
