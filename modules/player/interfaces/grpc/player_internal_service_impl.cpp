@@ -2,21 +2,6 @@
 
 namespace game_server::player {
 
-namespace {
-
-std::int64_t ParseLegacyNumericId(const std::string& raw_value) {
-    if (raw_value.empty()) {
-        return 0;
-    }
-    try {
-        return std::stoll(raw_value);
-    } catch (...) {
-        return 0;
-    }
-}
-
-}  // namespace
-
 PlayerInternalServiceImpl::PlayerInternalServiceImpl(PlayerService& player_service) : player_service_(player_service) {}
 
 ::grpc::Status PlayerInternalServiceImpl::GetPlayerSnapshot(
@@ -154,55 +139,6 @@ PlayerInternalServiceImpl::PlayerInternalServiceImpl(PlayerService& player_servi
         auto* reward = response->add_rewards();
         reward->set_reward_type(currency.currency_type);
         reward->set_amount(currency.amount);
-    }
-    return ::grpc::Status::OK;
-}
-
-::grpc::Status PlayerInternalServiceImpl::SpendStaminaForDungeonEnter(
-    ::grpc::ServerContext* context,
-    const game_backend::internal::player::SpendStaminaForDungeonEnterRequest* request,
-    game_backend::internal::player::SpendStaminaForDungeonEnterResponse* response) {
-    game_backend::internal::player::PrepareBattleEntryRequest translated;
-    translated.set_player_id(request->player_id());
-    translated.set_session_id(ParseLegacyNumericId(request->battle_id()));
-    translated.set_energy_cost(request->stamina_cost());
-    translated.set_idempotency_key("legacy-enter:" + request->battle_id());
-    game_backend::internal::player::PrepareBattleEntryResponse translated_response;
-    const auto status = PrepareBattleEntry(context, &translated, &translated_response);
-    if (status.ok()) {
-        response->set_remain_stamina(translated_response.remain_energy());
-    }
-    return status;
-}
-
-::grpc::Status PlayerInternalServiceImpl::ApplyDungeonSettlement(
-    ::grpc::ServerContext* context,
-    const game_backend::internal::player::ApplyDungeonSettlementRequest* request,
-    game_backend::internal::player::ApplyDungeonSettlementResponse* response) {
-    game_backend::internal::player::ApplyRewardGrantRequest translated;
-    translated.set_player_id(request->player_id());
-    translated.set_grant_id(ParseLegacyNumericId(request->battle_id()));
-    translated.set_session_id(ParseLegacyNumericId(request->battle_id()));
-    translated.set_idempotency_key("legacy-settle:" + request->battle_id());
-    auto* gold = translated.add_rewards();
-    gold->set_reward_type("gold");
-    gold->set_amount(request->normal_gold_reward());
-    if (request->first_clear_diamond_reward() > 0) {
-        auto* diamond = translated.add_rewards();
-        diamond->set_reward_type("diamond");
-        diamond->set_amount(request->first_clear_diamond_reward());
-    }
-    game_backend::internal::player::ApplyRewardGrantResponse translated_response;
-    const auto status = ApplyRewardGrant(context, &translated, &translated_response);
-    if (!status.ok()) {
-        return status;
-    }
-
-    response->set_first_clear(request->first_clear_diamond_reward() > 0);
-    for (const auto& reward : translated_response.rewards()) {
-        auto* item = response->add_rewards();
-        item->set_reward_type(reward.reward_type());
-        item->set_amount(reward.amount());
     }
     return ::grpc::Status::OK;
 }

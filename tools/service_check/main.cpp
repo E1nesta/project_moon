@@ -211,7 +211,7 @@ bool ValidateProductionSecrets(const common::config::SimpleConfig& config, std::
 bool ValidateTrustedGatewayConfig(const common::config::SimpleConfig& config, std::string* error_message) {
     const auto service_name = config.GetString("service.name");
     const bool requires_trusted_gateway = service_name == "gateway_server" || service_name == "login_server" ||
-                                          service_name == "player_server" || service_name == "dungeon_server";
+                                          service_name == "player_server" || service_name == "battle_server";
     if (!requires_trusted_gateway) {
         return true;
     }
@@ -278,7 +278,7 @@ int main(int argc, char* argv[]) {
         !ValidateTlsConfig(config, "upstream.tls.", false, &error_message) ||
         !ValidateTlsConfig(config, "upstream.login.tls.", false, &error_message) ||
         !ValidateTlsConfig(config, "upstream.player.tls.", false, &error_message) ||
-        !ValidateTlsConfig(config, "upstream.dungeon.tls.", false, &error_message)) {
+        !ValidateTlsConfig(config, "upstream.battle.tls.", false, &error_message)) {
         std::cerr << "tls config invalid: " << error_message << '\n';
         return 1;
     }
@@ -316,8 +316,8 @@ int main(int argc, char* argv[]) {
         std::cerr << "player upstream not ready: " << error_message << '\n';
         return 1;
     }
-    if (!CheckOptionalTcpDependency(config, "upstream.dungeon.host", "upstream.dungeon.port", timeout_ms, &error_message)) {
-        std::cerr << "dungeon upstream not ready: " << error_message << '\n';
+    if (!CheckOptionalTcpDependency(config, "upstream.battle.host", "upstream.battle.port", timeout_ms, &error_message)) {
+        std::cerr << "battle upstream not ready: " << error_message << '\n';
         return 1;
     }
 

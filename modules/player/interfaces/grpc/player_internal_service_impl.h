@@ -28,14 +28,6 @@ public:
     ::grpc::Status ApplyRewardGrant(::grpc::ServerContext* context,
                                     const game_backend::internal::player::ApplyRewardGrantRequest* request,
                                     game_backend::internal::player::ApplyRewardGrantResponse* response) override;
-    ::grpc::Status SpendStaminaForDungeonEnter(
-        ::grpc::ServerContext* context,
-        const game_backend::internal::player::SpendStaminaForDungeonEnterRequest* request,
-        game_backend::internal::player::SpendStaminaForDungeonEnterResponse* response) override;
-    ::grpc::Status ApplyDungeonSettlement(
-        ::grpc::ServerContext* context,
-        const game_backend::internal::player::ApplyDungeonSettlementRequest* request,
-        game_backend::internal::player::ApplyDungeonSettlementResponse* response) override;
 
 private:
     PlayerService& player_service_;

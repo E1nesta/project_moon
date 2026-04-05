@@ -15,7 +15,8 @@ struct PlayerProfile {
     int stamina = 0;
     std::int64_t gold = 0;
     std::int64_t diamond = 0;
-    int main_progress = 0;
+    int main_stage_id = 0;
+    int main_chapter_id = 0;
     std::int64_t fight_power = 0;
 };
 

@@ -11,12 +11,13 @@ INCLUDE_RE = re.compile(r'^\s*#include\s+"([^"]+)"', re.MULTILINE)
 EXPECTED_MODULE_SHAPES = {
     "login": {"application", "domain", "infrastructure"},
     "player": {"application", "domain", "infrastructure", "interfaces", "ports"},
-    "dungeon": {"application", "domain", "infrastructure", "ports"},
+    "battle": {"application", "domain", "infrastructure", "ports"},
 }
 
 EXPECTED_RUNTIME_DIRS = {
     "foundation",
     "grpc",
+    "mq",
     "observability",
     "protocol",
     "execution",

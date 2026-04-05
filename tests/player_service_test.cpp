@@ -72,6 +72,12 @@ int main() {
     if (!Expect(!first_load.loaded_from_cache, "expected first load to miss cache")) {
         return 1;
     }
+    if (!Expect(first_load.player_state.profile.main_stage_id == 0 &&
+                    first_load.player_state.profile.main_chapter_id == 0 &&
+                    first_load.player_state.stage_progress.empty(),
+                "expected chapter/stage fields to be initialized in load response")) {
+        return 1;
+    }
 
     const auto second_load = player_service.LoadPlayer(20001);
     if (!Expect(second_load.success, "expected second load to succeed")) {
@@ -90,35 +96,67 @@ int main() {
         return 1;
     }
 
-    const auto spend_stamina = player_service.SpendStaminaForDungeonEnter(20001, "battle-20001-1001-1", 10);
+    constexpr std::int64_t session_id = 2000110011;
+    const auto spend_stamina = player_service.PrepareBattleEntry(20001, session_id, 10, "battle-enter:20001:2000110011");
     if (!Expect(spend_stamina.success, "expected spend stamina to succeed")) {
         return 1;
     }
-    if (!Expect(spend_stamina.remain_stamina == 110, "expected stamina to be reduced")) {
+    if (!Expect(spend_stamina.remain_energy == 110, "expected stamina to be reduced")) {
         return 1;
     }
 
-    const auto spend_stamina_retry = player_service.SpendStaminaForDungeonEnter(20001, "battle-20001-1001-1", 10);
-    if (!Expect(spend_stamina_retry.success && spend_stamina_retry.remain_stamina == 110,
+    const auto spend_stamina_retry =
+        player_service.PrepareBattleEntry(20001, session_id, 10, "battle-enter:20001:2000110011");
+    if (!Expect(spend_stamina_retry.success && spend_stamina_retry.remain_energy == 110,
                 "expected spend stamina retry to be idempotent")) {
         return 1;
     }
 
-    const auto settlement =
-        player_service.ApplyDungeonSettlement(20001, "battle-20001-1001-1", 1001, 3, 100, 50);
-    if (!Expect(settlement.success, "expected dungeon settlement to succeed")) {
+    const auto spend_stamina_mismatch =
+        player_service.PrepareBattleEntry(20001, session_id, 11, "battle-enter:20001:2000110011");
+    if (!Expect(!spend_stamina_mismatch.success &&
+                    spend_stamina_mismatch.error_code == common::error::ErrorCode::kBattleMismatch,
+                "expected spend stamina mismatch to surface battle mismatch")) {
         return 1;
     }
-    if (!Expect(settlement.first_clear && settlement.gold_reward == 100 && settlement.diamond_reward == 50,
-                "expected first-clear settlement rewards")) {
+
+    const std::vector<common::model::Reward> rewards = {{"gold", 100}, {"diamond", 50}};
+    const auto settlement =
+        player_service.ApplyRewardGrant(20001, session_id, session_id, rewards, "battle-settle:20001:2000110011");
+    if (!Expect(settlement.success, "expected reward grant to succeed")) {
+        return 1;
+    }
+    if (!Expect(settlement.applied_currencies.size() == 2 &&
+                    settlement.applied_currencies[0].currency_type == "gold" &&
+                    settlement.applied_currencies[0].amount == 100 &&
+                    settlement.applied_currencies[1].currency_type == "diamond" &&
+                    settlement.applied_currencies[1].amount == 50,
+                "expected synchronous reward grant result")) {
         return 1;
     }
 
     const auto settlement_retry =
-        player_service.ApplyDungeonSettlement(20001, "battle-20001-1001-1", 1001, 3, 100, 50);
-    if (!Expect(settlement_retry.success && settlement_retry.first_clear &&
-                    settlement_retry.gold_reward == 100 && settlement_retry.diamond_reward == 50,
-                "expected settlement retry to be idempotent")) {
+        player_service.ApplyRewardGrant(20001, session_id, session_id, rewards, "battle-settle:20001:2000110011");
+    if (!Expect(settlement_retry.success && settlement_retry.applied_currencies.size() == 2,
+                "expected reward grant retry to be idempotent")) {
+        return 1;
+    }
+
+    const auto settlement_mismatch =
+        player_service.ApplyRewardGrant(20001, session_id + 1, session_id, rewards, "battle-settle:20001:2000110011");
+    if (!Expect(!settlement_mismatch.success &&
+                    settlement_mismatch.error_code == common::error::ErrorCode::kBattleMismatch,
+                "expected reward grant mismatch to surface battle mismatch")) {
+        return 1;
+    }
+
+    const auto reloaded = player_service.LoadPlayer(20001);
+    if (!Expect(reloaded.success, "expected reload after reward grant to succeed")) {
+        return 1;
+    }
+    if (!Expect(reloaded.player_state.profile.stamina == 110 && reloaded.player_state.profile.gold == 1100 &&
+                    reloaded.player_state.profile.diamond == 150,
+                "expected reload to reflect synchronous stamina and reward changes")) {
         return 1;
     }
 

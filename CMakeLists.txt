@@ -324,26 +324,26 @@ target_link_libraries(player_grpc_interfaces
         runtime_grpc
 )
 
-add_library(dungeon_application STATIC
-    modules/dungeon/application/dungeon_service.cpp
+add_library(battle_application STATIC
+    modules/battle/application/battle_service.cpp
 )
-set_backend_target_defaults(dungeon_application)
-target_link_libraries(dungeon_application
+set_backend_target_defaults(battle_application)
+target_link_libraries(battle_application
     PUBLIC
         runtime_foundation
 )
 
-add_library(dungeon_infrastructure STATIC
-    modules/dungeon/infrastructure/in_memory_dungeon_config_repository.cpp
-    modules/dungeon/infrastructure/grpc_player_snapshot_port.cpp
-    modules/dungeon/infrastructure/mysql_dungeon_repository.cpp
-    modules/dungeon/infrastructure/redis_player_lock_repository.cpp
-    modules/dungeon/infrastructure/redis_battle_context_repository.cpp
+add_library(battle_infrastructure STATIC
+    modules/battle/infrastructure/in_memory_stage_config_repository.cpp
+    modules/battle/infrastructure/grpc_player_snapshot_port.cpp
+    modules/battle/infrastructure/mysql_battle_repository.cpp
+    modules/battle/infrastructure/redis_player_lock_repository.cpp
+    modules/battle/infrastructure/redis_battle_context_repository.cpp
 )
-set_backend_target_defaults(dungeon_infrastructure)
-target_link_libraries(dungeon_infrastructure
+set_backend_target_defaults(battle_infrastructure)
+target_link_libraries(battle_infrastructure
     PUBLIC
-        dungeon_application
+        battle_application
         runtime_foundation
         runtime_storage
         internal_protocol
@@ -389,11 +389,11 @@ add_backend_executable(player_internal_grpc_server
 )
 target_link_libraries(player_internal_grpc_server PRIVATE player_application player_infrastructure player_grpc_interfaces runtime_core)
 
-add_backend_executable(dungeon_server
-    apps/dungeon/main.cpp
-    apps/dungeon/dungeon_server_app.cpp
+add_backend_executable(battle_server
+    apps/battle/main.cpp
+    apps/battle/battle_server_app.cpp
 )
-target_link_libraries(dungeon_server PRIVATE dungeon_application dungeon_infrastructure runtime_core)
+target_link_libraries(battle_server PRIVATE battle_application battle_infrastructure runtime_core)
 
 add_executable(service_check
     tools/service_check/main.cpp
@@ -425,8 +425,8 @@ target_link_libraries(demo_flow
         login_infrastructure
         player_application
         player_infrastructure
-        dungeon_application
-        dungeon_infrastructure
+        battle_application
+        battle_infrastructure
         runtime_core
 )
 
@@ -452,13 +452,13 @@ add_executable(grpc_player_snapshot_port_test
     tests/grpc_player_snapshot_port_test.cpp
 )
 set_backend_target_defaults(grpc_player_snapshot_port_test)
-target_link_libraries(grpc_player_snapshot_port_test PRIVATE dungeon_infrastructure player_application player_infrastructure player_grpc_interfaces runtime_core)
+target_link_libraries(grpc_player_snapshot_port_test PRIVATE battle_infrastructure player_application player_infrastructure player_grpc_interfaces runtime_core)
 
-add_executable(dungeon_service_test
-    tests/dungeon_service_test.cpp
+add_executable(battle_service_test
+    tests/battle_service_test.cpp
 )
-set_backend_target_defaults(dungeon_service_test)
-target_link_libraries(dungeon_service_test PRIVATE dungeon_application dungeon_infrastructure runtime_core)
+set_backend_target_defaults(battle_service_test)
+target_link_libraries(battle_service_test PRIVATE battle_application battle_infrastructure runtime_core)
 
 add_executable(session_binding_service_test
     tests/session_binding_store_test.cpp
@@ -537,7 +537,7 @@ add_test(NAME login_service_test COMMAND login_service_test)
 add_test(NAME player_service_test COMMAND player_service_test)
 add_test(NAME player_internal_service_test COMMAND player_internal_service_test)
 add_test(NAME grpc_player_snapshot_port_test COMMAND grpc_player_snapshot_port_test)
-add_test(NAME dungeon_service_test COMMAND dungeon_service_test)
+add_test(NAME battle_service_test COMMAND battle_service_test)
 add_test(NAME session_binding_service_test COMMAND session_binding_service_test)
 add_test(NAME packet_codec_test COMMAND packet_codec_test)
 add_test(NAME request_dispatcher_test COMMAND request_dispatcher_test)

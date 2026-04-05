@@ -19,10 +19,6 @@ enum class MessageId : std::uint32_t {
     kSettleBattleResponse = 1204,
     kGetRewardGrantStatusRequest = 1205,
     kGetRewardGrantStatusResponse = 1206,
-    kEnterDungeonRequest = 1201,
-    kEnterDungeonResponse = 1202,
-    kSettleDungeonRequest = 1203,
-    kSettleDungeonResponse = 1204,
     kErrorResponse = 9000,
 };
 

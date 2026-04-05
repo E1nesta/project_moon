@@ -9,6 +9,10 @@ namespace {
 
 constexpr char kHexDigits[] = "0123456789abcdef";
 
+int ChapterIdFromStageId(int stage_id) {
+    return stage_id > 0 ? stage_id / 1000 : 0;
+}
+
 std::string EscapeString(common::mysql::MySqlClient& mysql, const std::string& value) {
     return mysql.Escape(value);
 }
@@ -29,7 +33,7 @@ MySqlPlayerRepository::MySqlPlayerRepository(common::mysql::MySqlClientPool& mys
 std::optional<common::model::PlayerState> MySqlPlayerRepository::LoadPlayerState(std::int64_t player_id) const {
     auto mysql = mysql_pool_.Acquire();
     std::ostringstream profile_sql;
-    profile_sql << "SELECT player_id, account_id, server_id, nickname, level, energy, main_progress, fight_power "
+    profile_sql << "SELECT player_id, account_id, server_id, nickname, level, energy, main_stage_id, fight_power "
                    "FROM "
                 << ProfileTable(player_id) << " WHERE player_id = " << player_id << " LIMIT 1";
     const auto profile_row = mysql->QueryOne(profile_sql.str());
@@ -45,7 +49,8 @@ std::optional<common::model::PlayerState> MySqlPlayerRepository::LoadPlayerState
     state.profile.player_name = state.profile.nickname;
     state.profile.level = std::stoi(profile_row->at("level"));
     state.profile.stamina = std::stoi(profile_row->at("energy"));
-    state.profile.main_progress = std::stoi(profile_row->at("main_progress"));
+    state.profile.main_stage_id = std::stoi(profile_row->at("main_stage_id"));
+    state.profile.main_chapter_id = ChapterIdFromStageId(state.profile.main_stage_id);
     state.profile.fight_power = std::stoll(profile_row->at("fight_power"));
 
     std::ostringstream currency_sql;

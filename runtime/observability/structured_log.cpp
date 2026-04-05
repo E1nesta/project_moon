@@ -321,7 +321,7 @@ std::string DescribeUpstreamService(common::net::MessageId message_id) {
     case common::net::MessageId::kEnterBattleRequest:
     case common::net::MessageId::kSettleBattleRequest:
     case common::net::MessageId::kGetRewardGrantStatusRequest:
-        return "dungeon";
+        return "battle";
     default:
         return {};
     }

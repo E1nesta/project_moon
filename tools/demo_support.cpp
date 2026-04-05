@@ -111,11 +111,11 @@ bool EnsureProfile(common::mysql::MySqlClient& player_mysql,
                    std::string* error_message) {
     std::ostringstream sql;
     sql << "INSERT INTO " << ProfileTable(config.player_id)
-        << " (player_id, account_id, server_id, nickname, level, exp, energy, stamina_recover_at, main_progress, "
+        << " (player_id, account_id, server_id, nickname, level, exp, energy, stamina_recover_at, main_stage_id, "
            "fight_power, created_at, updated_at) VALUES ("
         << config.player_id << ", " << config.account_id << ", " << config.server_id << ", '"
         << player_mysql.Escape(config.player_name) << "', " << config.level << ", 0, " << config.stamina
-        << ", NULL, " << config.main_progress << ", " << config.fight_power
+        << ", NULL, " << config.main_stage_id << ", " << config.fight_power
         << ", CURRENT_TIMESTAMP(3), CURRENT_TIMESTAMP(3)) "
            "ON DUPLICATE KEY UPDATE account_id = VALUES(account_id), server_id = VALUES(server_id), "
            "nickname = VALUES(nickname), updated_at = CURRENT_TIMESTAMP(3)";
@@ -175,14 +175,14 @@ bool ResetPlayerState(common::mysql::MySqlClient& player_mysql,
     std::ostringstream profile_sql;
     profile_sql << "INSERT INTO " << ProfileTable(config.player_id)
                 << " (player_id, account_id, server_id, nickname, level, exp, energy, stamina_recover_at, "
-                   "main_progress, fight_power, created_at, updated_at) VALUES ("
+                   "main_stage_id, fight_power, created_at, updated_at) VALUES ("
                 << config.player_id << ", " << config.account_id << ", " << config.server_id << ", '"
                 << player_mysql.Escape(config.player_name) << "', " << config.level << ", 0, " << config.stamina
-                << ", NULL, " << config.main_progress << ", " << config.fight_power
+                << ", NULL, " << config.main_stage_id << ", " << config.fight_power
                 << ", CURRENT_TIMESTAMP(3), CURRENT_TIMESTAMP(3)) "
                    "ON DUPLICATE KEY UPDATE account_id = VALUES(account_id), server_id = VALUES(server_id), "
                    "nickname = VALUES(nickname), level = VALUES(level), exp = VALUES(exp), energy = VALUES(energy), "
-                   "stamina_recover_at = VALUES(stamina_recover_at), main_progress = VALUES(main_progress), "
+                   "stamina_recover_at = VALUES(stamina_recover_at), main_stage_id = VALUES(main_stage_id), "
                    "fight_power = VALUES(fight_power), updated_at = CURRENT_TIMESTAMP(3)";
     if (!ExecuteSql(player_mysql, profile_sql.str(), error_message)) {
         return false;
@@ -215,7 +215,7 @@ bool ResetPlayerState(common::mysql::MySqlClient& player_mysql,
 
 DemoDataConfig ReadDemoDataConfig(const common::config::SimpleConfig& login_config,
                                   const common::config::SimpleConfig& player_config,
-                                  const common::config::SimpleConfig& dungeon_config) {
+                                  const common::config::SimpleConfig& stage_config) {
     DemoDataConfig config;
     config.account_id = login_config.GetInt("demo.account_id", 10001);
     config.player_id = player_config.GetInt("demo.player_id", login_config.GetInt("demo.default_player_id", 20001));
@@ -231,8 +231,8 @@ DemoDataConfig ReadDemoDataConfig(const common::config::SimpleConfig& login_conf
     config.stamina = player_config.GetInt("demo.stamina", 120);
     config.gold = player_config.GetInt("demo.gold", 1000);
     config.diamond = player_config.GetInt("demo.diamond", 100);
-    config.stage_id = dungeon_config.GetInt("demo.dungeon_id", 1001);
-    config.main_progress = player_config.GetInt("demo.main_progress", config.stage_id);
+    config.stage_id = stage_config.GetInt("demo.stage_id", 1001);
+    config.main_stage_id = player_config.GetInt("demo.main_stage_id", config.stage_id);
     config.fight_power = player_config.GetInt("demo.fight_power", std::max(1200, config.level * 100));
     config.server_id = player_config.GetInt("demo.server_id", 1);
     return config;

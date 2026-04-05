@@ -37,8 +37,8 @@ message ErrorResponse {
   string error_message = 4;
 }
 
-message PlayerDungeonProgress {
-  int32 dungeon_id = 1;
+message PlayerStageProgress {
+  int32 stage_id = 1;
   int32 best_star = 2;
   bool is_first_clear = 3;
 }
@@ -53,8 +53,9 @@ message PlayerProfile {
   int64 diamond = 7;
   int32 server_id = 8;
   string nickname = 9;
-  int32 main_progress = 10;
+  int32 main_stage_id = 10;
   int64 fight_power = 11;
+  int32 main_chapter_id = 12;
 }
 
 message CurrencyBalance {
@@ -70,7 +71,7 @@ message RoleSummary {
 
 message PlayerState {
   PlayerProfile profile = 1;
-  repeated PlayerDungeonProgress dungeon_progress = 2;
+  repeated PlayerStageProgress stage_progress = 2;
   repeated CurrencyBalance currencies = 3;
   repeated RoleSummary role_summaries = 4;
 }
@@ -152,33 +153,4 @@ message GetRewardGrantStatusResponse {
   int64 reward_grant_id = 2;
   int32 grant_status = 3;
   repeated Reward granted_rewards = 4;
-}
-
-message EnterDungeonRequest {
-  RequestContext context = 1;
-  int64 player_id = 2;
-  int32 dungeon_id = 3;
-}
-
-message EnterDungeonResponse {
-  ResponseContext context = 1;
-  reserved 2 to 5;
-  string battle_id = 6;
-  int32 remain_stamina = 7;
-}
-
-message SettleDungeonRequest {
-  RequestContext context = 1;
-  int64 player_id = 2;
-  string battle_id = 3;
-  int32 dungeon_id = 4;
-  int32 star = 5;
-  bool result = 6;
-}
-
-message SettleDungeonResponse {
-  ResponseContext context = 1;
-  reserved 2 to 5;
-  bool first_clear = 6;
-  repeated Reward rewards = 7;
 }

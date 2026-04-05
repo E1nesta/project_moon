@@ -617,8 +617,8 @@ bool ServiceApp::ValidateBaseConfig(std::string* error_message) const {
                            "upstream.player.tls.",
                            false,
                            error_message) ||
-        !ValidateTlsConfig(framework::transport::ReadTlsOptions(config_, "upstream.dungeon.tls."),
-                           "upstream.dungeon.tls.",
+        !ValidateTlsConfig(framework::transport::ReadTlsOptions(config_, "upstream.battle.tls."),
+                           "upstream.battle.tls.",
                            false,
                            error_message)) {
         return false;

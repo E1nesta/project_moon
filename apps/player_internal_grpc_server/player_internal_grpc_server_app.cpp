@@ -17,6 +17,20 @@ namespace {
 
 std::atomic_bool g_running{true};
 
+bool UseInternalGrpcMtls(const common::config::SimpleConfig& config) {
+    const auto environment = config.GetString("runtime.environment", "local");
+    return environment == "staging" || environment == "prod";
+}
+
+framework::grpc::TlsServerCredentialsOptions BuildInternalGrpcTlsOptions() {
+    framework::grpc::TlsServerCredentialsOptions options;
+    options.cert_chain_file = "/etc/game_backend/tls/player_internal_grpc_server.crt";
+    options.private_key_file = "/etc/game_backend/tls/player_internal_grpc_server.key";
+    options.client_ca_file = "/etc/game_backend/tls/ca.pem";
+    options.require_client_auth = true;
+    return options;
+}
+
 void HandleSignal(int /*signal*/) {
     g_running.store(false);
 }
@@ -121,7 +135,10 @@ bool PlayerInternalGrpcServerApp::StartServer(std::string* error_message) {
     server_runner_ = std::make_unique<framework::grpc::ServerRunner>(
         config_.GetString("grpc.listen.host", "0.0.0.0"),
         config_.GetInt("grpc.listen.port", 7400));
-    if (!server_runner_->Start(grpc_service_.get(), error_message)) {
+    const auto started = UseInternalGrpcMtls(config_)
+                             ? server_runner_->Start(grpc_service_.get(), BuildInternalGrpcTlsOptions(), error_message)
+                             : server_runner_->Start(grpc_service_.get(), error_message);
+    if (!started) {
         server_runner_.reset();
         return false;
     }

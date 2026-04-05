@@ -1,7 +1,7 @@
 #pragma once
 
 #include "modules/player/domain/player_state.h"
-#include "modules/dungeon/domain/reward.h"
+#include "modules/battle/domain/reward.h"
 
 #include <cstdint>
 #include <optional>

@@ -86,11 +86,11 @@ if ! compose_cmd logs gateway_2 --since "$FAILOVER_MARK" | grep -q "forwarding r
 fi
 wait_service gateway_1
 
-echo "[2/3] upstream error: stop dungeon_server and expect SERVICE_UNAVAILABLE on enter"
-compose_cmd stop dungeon_server >/dev/null
-mark_stopped dungeon_server
+echo "[2/3] upstream error: stop battle_server and expect SERVICE_UNAVAILABLE on enter"
+compose_cmd stop battle_server >/dev/null
+mark_stopped battle_server
 run_demo_client --happy-path-only --skip-session-recovery --expect-enter-error SERVICE_UNAVAILABLE
-wait_service dungeon_server
+wait_service battle_server
 
 echo "[3/3] session expiry: force cross-gateway recovery to fail with SESSION_INVALID"
 LOGIN_MARK="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"

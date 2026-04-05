@@ -125,8 +125,8 @@ inline bool WriteFixtureSet(const std::filesystem::path& directory) {
            write("login_server.key", kServerKeyPem) &&
            write("player_server.crt", kServerCertPem) &&
            write("player_server.key", kServerKeyPem) &&
-           write("dungeon_server.crt", kServerCertPem) &&
-           write("dungeon_server.key", kServerKeyPem);
+           write("battle_server.crt", kServerCertPem) &&
+           write("battle_server.key", kServerKeyPem);
 }
 
 }  // namespace test::tls

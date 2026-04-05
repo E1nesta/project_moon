@@ -102,9 +102,9 @@ services:
       timeout: 3s
       retries: 20
 
-  dungeon_server:
+  battle_server:
     <<: *backend-service
-    command: ["./dungeon_server", "--config", "configs/demo/dungeon_server.conf"]
+    command: ["./battle_server", "--config", "configs/demo/battle_server.conf"]
     depends_on:
       battle_schema_migrator:
         condition: service_completed_successfully
@@ -115,7 +115,7 @@ services:
       player_internal_grpc_server:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "./service_check", "--config", "configs/demo/dungeon_server.conf", "--mode", "ready"]
+      test: ["CMD", "./service_check", "--config", "configs/demo/battle_server.conf", "--mode", "ready"]
       interval: 5s
       timeout: 3s
       retries: 20
@@ -130,7 +130,7 @@ services:
         condition: service_healthy
       player_server:
         condition: service_healthy
-      dungeon_server:
+      battle_server:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "./service_check", "--config", "configs/demo/gateway_server_1.conf", "--mode", "ready"]
@@ -148,7 +148,7 @@ services:
         condition: service_healthy
       player_server:
         condition: service_healthy
-      dungeon_server:
+      battle_server:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "./service_check", "--config", "configs/demo/gateway_server_2.conf", "--mode", "ready"]

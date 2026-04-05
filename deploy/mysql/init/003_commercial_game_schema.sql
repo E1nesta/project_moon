@@ -153,7 +153,7 @@ BEGIN
             'exp BIGINT NOT NULL DEFAULT 0,',
             'energy INT NOT NULL DEFAULT 0,',
             'stamina_recover_at DATETIME(3) NULL,',
-            'main_progress INT NOT NULL DEFAULT 0,',
+            'main_stage_id INT NOT NULL DEFAULT 0,',
             'fight_power BIGINT NOT NULL DEFAULT 0,',
             'created_at DATETIME(3) NOT NULL,',
             'updated_at DATETIME(3) NOT NULL,',

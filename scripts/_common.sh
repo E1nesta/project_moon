@@ -55,8 +55,17 @@ compose_env_file() {
   fi
 }
 
+docker_cmd() {
+  if [[ -x /usr/bin/docker ]]; then
+    printf '%s\n' /usr/bin/docker
+    return 0
+  fi
+
+  command -v docker
+}
+
 compose_cmd() {
-  docker compose --env-file "$(compose_env_file)" -f "$(compose_file)" "$@"
+  "$(docker_cmd)" compose --env-file "$(compose_env_file)" -f "$(compose_file)" "$@"
 }
 
 build_local_binaries() {
@@ -69,6 +78,28 @@ build_local_binaries() {
     cd "$ROOT_DIR"
     cmake --preset "$(configure_preset)"
     cmake --build --preset "$(build_preset)" --parallel
+  )
+}
+
+build_mvp_binaries() {
+  if [[ "${SKIP_BUILD:-0}" == "1" ]]; then
+    return 0
+  fi
+
+  prepare_grpc_toolchain
+  (
+    cd "$ROOT_DIR"
+    cmake --preset "$(configure_preset)"
+    cmake --build --preset "$(build_preset)" --parallel --target \
+      gateway_server \
+      login_server \
+      player_server \
+      player_internal_grpc_server \
+      battle_server \
+      demo_flow \
+      demo_client \
+      service_check \
+      password_tool
   )
 }
 

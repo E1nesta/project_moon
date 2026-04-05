@@ -12,13 +12,13 @@ enum class ErrorCode {
     kSessionInvalid,
     kPlayerNotFound,
     kPlayerBusy,
-    kDungeonNotFound,
-    kDungeonLocked,
+    kStageNotFound,
+    kStageLocked,
     kStaminaNotEnough,
     kBattleNotFound,
     kBattleMismatch,
     kBattleAlreadySettled,
-    kInvalidDungeonId,
+    kInvalidStageId,
     kInvalidStar,
     kStorageError,
     kServiceUnavailable,
@@ -47,10 +47,10 @@ inline std::string_view ToString(ErrorCode code) {
         return "PLAYER_NOT_FOUND";
     case ErrorCode::kPlayerBusy:
         return "PLAYER_BUSY";
-    case ErrorCode::kDungeonNotFound:
-        return "DUNGEON_NOT_FOUND";
-    case ErrorCode::kDungeonLocked:
-        return "DUNGEON_LOCKED";
+    case ErrorCode::kStageNotFound:
+        return "STAGE_NOT_FOUND";
+    case ErrorCode::kStageLocked:
+        return "STAGE_LOCKED";
     case ErrorCode::kStaminaNotEnough:
         return "STAMINA_NOT_ENOUGH";
     case ErrorCode::kBattleNotFound:
@@ -59,8 +59,8 @@ inline std::string_view ToString(ErrorCode code) {
         return "BATTLE_MISMATCH";
     case ErrorCode::kBattleAlreadySettled:
         return "BATTLE_ALREADY_SETTLED";
-    case ErrorCode::kInvalidDungeonId:
-        return "INVALID_DUNGEON_ID";
+    case ErrorCode::kInvalidStageId:
+        return "INVALID_STAGE_ID";
     case ErrorCode::kInvalidStar:
         return "INVALID_STAR";
     case ErrorCode::kStorageError:

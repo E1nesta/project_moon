@@ -117,7 +117,7 @@ bool GatewayServerApp::BuildDependencies(std::string* error_message) {
     const auto upstream_tls = framework::transport::ReadTlsOptions(Config(), "upstream.tls.");
     const auto login_upstream_tls = ReadScopedTlsOptions(Config(), "upstream.login.tls.", upstream_tls);
     const auto player_upstream_tls = ReadScopedTlsOptions(Config(), "upstream.player.tls.", upstream_tls);
-    const auto dungeon_upstream_tls = ReadScopedTlsOptions(Config(), "upstream.dungeon.tls.", upstream_tls);
+    const auto battle_upstream_tls = ReadScopedTlsOptions(Config(), "upstream.battle.tls.", upstream_tls);
     options.worker_threads = static_cast<std::size_t>(Config().GetInt("gateway.forward_workers", 4));
     options.queue_limit = static_cast<std::size_t>(Config().GetInt("gateway.forward_queue_limit", 1024));
     options.login = {Config().GetString("upstream.login.host", "127.0.0.1"),
@@ -130,11 +130,11 @@ bool GatewayServerApp::BuildDependencies(std::string* error_message) {
                       timeout_ms,
                       pool_size,
                       player_upstream_tls};
-    options.dungeon = {Config().GetString("upstream.dungeon.host", "127.0.0.1"),
-                       Config().GetInt("upstream.dungeon.port", 7300),
-                       timeout_ms,
-                       pool_size,
-                       dungeon_upstream_tls};
+    options.battle = {Config().GetString("upstream.battle.host", "127.0.0.1"),
+                      Config().GetInt("upstream.battle.port", 7300),
+                      timeout_ms,
+                      pool_size,
+                      battle_upstream_tls};
     forward_executor_ = std::make_unique<GatewayForwardExecutor>(options);
     upstream_response_validator_ = std::make_unique<UpstreamResponseValidator>(*session_binding_service_);
     return forward_executor_->Start(error_message);

@@ -19,7 +19,7 @@ struct DemoDataConfig {
     int server_id = 1;
     int level = 10;
     int stamina = 120;
-    int main_progress = 1001;
+    int main_stage_id = 1001;
     std::int64_t fight_power = 1200;
     std::int64_t gold = 1000;
     std::int64_t diamond = 100;
@@ -28,7 +28,7 @@ struct DemoDataConfig {
 
 DemoDataConfig ReadDemoDataConfig(const common::config::SimpleConfig& login_config,
                                   const common::config::SimpleConfig& player_config,
-                                  const common::config::SimpleConfig& dungeon_config);
+                                  const common::config::SimpleConfig& stage_config);
 
 std::string PlayerShardSuffix(std::int64_t player_id);
 std::string CurrentMonthSuffix();

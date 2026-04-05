@@ -331,6 +331,9 @@ bool TransportClient::SendAndReceive(const common::net::Packet& request,
         return false;
     }
 
+    // Keep gateway upstream calls request-scoped for MVP stability.
+    // This avoids reusing half-closed sockets when upstream services idle out.
+    Close();
     return true;
 }
 

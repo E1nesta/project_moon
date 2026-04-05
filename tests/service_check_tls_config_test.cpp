@@ -89,11 +89,11 @@ int main(int /*argc*/, char* argv[]) {
     const auto delivery_gateway = project_root / "configs/delivery/gateway_server_1.conf";
     const auto delivery_login = project_root / "configs/delivery/login_server.conf";
     const auto delivery_player = project_root / "configs/delivery/player_server.conf";
-    const auto delivery_dungeon = project_root / "configs/delivery/dungeon_server.conf";
+    const auto delivery_battle = project_root / "configs/delivery/battle_server.conf";
     const auto prod_gateway = project_root / "configs/prod/gateway_server.conf";
     const auto prod_login = project_root / "configs/prod/login_server.conf";
     const auto prod_player = project_root / "configs/prod/player_server.conf";
-    const auto prod_dungeon = project_root / "configs/prod/dungeon_server.conf";
+    const auto prod_battle = project_root / "configs/prod/battle_server.conf";
 
     TempDirectory temp_directory;
     if (!Expect(temp_directory.valid(), "expected temporary directory to be created")) {
@@ -146,8 +146,8 @@ int main(int /*argc*/, char* argv[]) {
     }
     if (!Expect(
             RunCommand(delivery_environment + ShellQuote(service_check.string()) + " --config " +
-                       ShellQuote(delivery_dungeon.string()) + " --mode config") == 0,
-            "expected delivery dungeon config to pass with complete TLS files")) {
+                       ShellQuote(delivery_battle.string()) + " --mode config") == 0,
+            "expected delivery battle config to pass with complete TLS files")) {
         return 1;
     }
 
@@ -173,8 +173,8 @@ int main(int /*argc*/, char* argv[]) {
     }
     if (!Expect(
             RunCommand(production_environment + ShellQuote(service_check.string()) + " --config " +
-                       ShellQuote(prod_dungeon.string()) + " --mode config") == 0,
-            "expected production dungeon config to pass with complete TLS files")) {
+                       ShellQuote(prod_battle.string()) + " --mode config") == 0,
+            "expected production battle config to pass with complete TLS files")) {
         return 1;
     }
 

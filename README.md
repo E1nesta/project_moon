@@ -6,7 +6,12 @@
 - `login_server` 负责账号登录和 session 签发
 - `player_server` 负责玩家状态读取与缓存
 - `player_internal_grpc_server` 负责向其他服务暴露玩家域内部写接口
-- `dungeon_server` 负责进入战斗、结算以及同步奖励落账
+- `battle_server` 负责进入战斗、结算以及同步奖励落账
+- `delivery/prod` 环境里，`battle_server -> player_internal_grpc_server` 的内部写链路默认使用 mTLS
+
+当前代码主链的业务闭环说明见：
+
+- [docs/mvp-main-flow.md](/home/love/code/server/docs/mvp-main-flow.md)
 
 ## 仓库结构
 
@@ -83,7 +88,7 @@
 相关脚本：
 
 - [scripts/up.sh](/home/love/code/server/scripts/up.sh) 先本地构建，再启动 compose
-- [scripts/run_demo.sh](/home/love/code/server/scripts/run_demo.sh) 启动环境后执行 demo 流程
+- [scripts/run_mvp_flow.sh](/home/love/code/server/scripts/run_mvp_flow.sh) 启动环境并执行当前 MVP 主链
 - [scripts/down.sh](/home/love/code/server/scripts/down.sh) 停止 compose
 
 ### 方式二：Docker 里同时构建和运行
@@ -114,13 +119,14 @@ docker compose --env-file deploy/.env.demo -f deploy/docker-compose.yml down --r
 
 ```bash
 ./scripts/up.sh
-./scripts/run_demo.sh
+./scripts/run_mvp_flow.sh
 ./scripts/down.sh
 ```
 
 说明：
 
 - `scripts/up.sh` 默认会先在 WSL 本地构建，再启动 compose
+- `scripts/run_mvp_flow.sh` 是当前 MVP 主业务链的标准入口
 - 如果你只想拉起容器，可以自己直接调用 `docker compose`
 - 如果你希望 compose 顺手重建镜像，可以设置 `COMPOSE_BUILD=1`
 - `demo` 环境以 [deploy/.env.demo](/home/love/code/server/deploy/.env.demo) 为准
@@ -131,7 +137,7 @@ docker compose --env-file deploy/.env.demo -f deploy/docker-compose.yml down --r
 - `7000`：对外网关或 Nginx 暴露口
 - `7100`：`login_server`
 - `7200`：`player_server`
-- `7300`：`dungeon_server`
+- `7300`：`battle_server`
 - `7400`：`player_internal_grpc_server`
 - `3307`：MySQL 映射到宿主机
 - `6379`：Redis 映射到宿主机
@@ -146,12 +152,19 @@ docker compose --env-file deploy/.env.demo -f deploy/docker-compose.yml down --r
 
 - [deploy/.env.demo](/home/love/code/server/deploy/.env.demo)
 - [deploy/.env.delivery.example](/home/love/code/server/deploy/.env.delivery.example)
+- [deploy/tls/README.md](/home/love/code/server/deploy/tls/README.md)
 
 ## 现状说明
 
-当前代码里的主流程已经以 `EnterBattle / SettleBattle / GetRewardGrantStatus` 为主，同时还保留了一部分旧的 `EnterDungeon / SettleDungeon` 兼容字段和消息别名。之前那份根目录 MVP 文档描述的是更早阶段的边界，和现在的协议、服务拆分已经不一致，所以已移除，改由本 README 作为当前入口说明。
+当前代码里的主流程已经统一为 `EnterBattle / SettleBattle / GetRewardGrantStatus`。之前那份根目录 MVP 文档描述的是更早阶段的边界，和现在的协议、服务拆分已经不一致，所以已移除，改由本 README 和主链文档作为当前入口说明。
 
 文档维护原则：
 
 - 以代码、配置和脚本实际行为为准
 - 过期说明直接删除，不保留并行旧文档
+
+## Delivery 基线
+
+- `demo` 环境会自动灌入 demo 账号、角色和货币数据
+- `delivery/prod` 默认不会灌入 demo 账号和角色，只保留 schema 与授权初始化
+- `delivery/prod` 的内部 gRPC 资产写链路固定采用 mTLS，不提供运行期开关

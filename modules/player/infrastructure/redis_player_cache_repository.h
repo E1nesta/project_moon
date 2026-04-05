@@ -21,7 +21,7 @@ public:
 private:
     [[nodiscard]] static std::string CacheKey(std::int64_t player_id);
     [[nodiscard]] static std::string SerializeProgress(const common::model::PlayerState& player_state);
-    [[nodiscard]] static std::vector<common::model::PlayerDungeonProgress> ParseProgress(const std::string& raw_value);
+    [[nodiscard]] static std::vector<common::model::PlayerStageProgress> ParseProgress(const std::string& raw_value);
 
     common::redis::RedisClientPool& redis_pool_;
     int ttl_seconds_ = 300;

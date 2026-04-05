@@ -33,7 +33,7 @@ struct DemoOptions {
     std::string gateway_config = "configs/local/gateway_server.conf";
     std::string login_config = "configs/local/login_server.conf";
     std::string player_config = "configs/local/player_server.conf";
-    std::string dungeon_config = "configs/local/dungeon_server.conf";
+    std::string stage_config = "configs/local/battle_server.conf";
     std::string account_name = "demo";
     std::string password = "demo123";
     bool reset_demo_state = true;
@@ -87,11 +87,11 @@ std::optional<common::error::ErrorCode> ParseErrorCode(std::string_view value) {
     if (value == "PLAYER_BUSY") {
         return ErrorCode::kPlayerBusy;
     }
-    if (value == "DUNGEON_NOT_FOUND") {
-        return ErrorCode::kDungeonNotFound;
+    if (value == "STAGE_NOT_FOUND") {
+        return ErrorCode::kStageNotFound;
     }
-    if (value == "DUNGEON_LOCKED") {
-        return ErrorCode::kDungeonLocked;
+    if (value == "STAGE_LOCKED") {
+        return ErrorCode::kStageLocked;
     }
     if (value == "STAMINA_NOT_ENOUGH") {
         return ErrorCode::kStaminaNotEnough;
@@ -150,12 +150,12 @@ DemoOptions ParseOptions(int argc, char* argv[]) {
                 options.gateway_config = "configs/demo/gateway_client.conf";
                 options.login_config = "configs/demo/login_server.conf";
                 options.player_config = "configs/demo/player_server.conf";
-                options.dungeon_config = "configs/demo/dungeon_server.conf";
+                options.stage_config = "configs/demo/battle_server.conf";
             } else if (options.config_profile == "delivery") {
                 options.gateway_config = "configs/delivery/gateway_client.conf";
                 options.login_config = "configs/delivery/login_server.conf";
                 options.player_config = "configs/delivery/player_server.conf";
-                options.dungeon_config = "configs/delivery/dungeon_server.conf";
+                options.stage_config = "configs/delivery/battle_server.conf";
             }
         } else if (arg == "--gateway-config" && index + 1 < argc) {
             options.gateway_config = argv[++index];
@@ -163,8 +163,8 @@ DemoOptions ParseOptions(int argc, char* argv[]) {
             options.login_config = argv[++index];
         } else if ((arg == "--player-config" || arg == "--game-config") && index + 1 < argc) {
             options.player_config = argv[++index];
-        } else if (arg == "--dungeon-config" && index + 1 < argc) {
-            options.dungeon_config = argv[++index];
+        } else if (arg == "--battle-config" && index + 1 < argc) {
+            options.stage_config = argv[++index];
         } else if (arg == "--account" && index + 1 < argc) {
             options.account_name = argv[++index];
         } else if (arg == "--password" && index + 1 < argc) {
@@ -366,22 +366,22 @@ int main(int argc, char* argv[]) {
     common::config::SimpleConfig gateway_config;
     common::config::SimpleConfig login_config;
     common::config::SimpleConfig player_config;
-    common::config::SimpleConfig dungeon_config;
+    common::config::SimpleConfig stage_config;
     if (!LoadConfig(options.gateway_config, gateway_config) ||
         !LoadConfig(options.login_config, login_config) ||
         !LoadConfig(options.player_config, player_config) ||
-        !LoadConfig(options.dungeon_config, dungeon_config)) {
+        !LoadConfig(options.stage_config, stage_config)) {
         return 1;
     }
 
-    const auto demo_data = demo::support::ReadDemoDataConfig(login_config, player_config, dungeon_config);
+    const auto demo_data = demo::support::ReadDemoDataConfig(login_config, player_config, stage_config);
     if (options.reset_demo_state) {
         common::mysql::MySqlClient account_mysql(common::mysql::ReadConnectionOptions(login_config, "storage.account.mysql."));
         common::mysql::MySqlClient player_mysql(common::mysql::ReadConnectionOptions(player_config, "storage.player.mysql."));
-        common::mysql::MySqlClient battle_mysql(common::mysql::ReadConnectionOptions(dungeon_config, "storage.battle.mysql."));
+        common::mysql::MySqlClient battle_mysql(common::mysql::ReadConnectionOptions(stage_config, "storage.battle.mysql."));
         common::redis::RedisClient account_redis(common::redis::ReadConnectionOptions(login_config, "storage.account.redis."));
         common::redis::RedisClient player_redis(common::redis::ReadConnectionOptions(player_config, "storage.player.redis."));
-        common::redis::RedisClient battle_redis(common::redis::ReadConnectionOptions(dungeon_config, "storage.battle.redis."));
+        common::redis::RedisClient battle_redis(common::redis::ReadConnectionOptions(stage_config, "storage.battle.redis."));
         if (!ConnectMySql("account_mysql", account_mysql) ||
             !ConnectMySql("player_mysql", player_mysql) ||
             !ConnectMySql("battle_mysql", battle_mysql) ||
@@ -642,11 +642,11 @@ int main(int argc, char* argv[]) {
                  "reload player should reflect stamina consumption") ||
         !Require(final_load_response.player_state().profile().gold() ==
                      load_response.player_state().profile().gold() +
-                         dungeon_config.GetInt("demo.dungeon_normal_gold_reward", 100),
+                         stage_config.GetInt("demo.stage_normal_gold_reward", 100),
                  "reload player should reflect gold reward") ||
         !Require(final_load_response.player_state().profile().diamond() ==
                      load_response.player_state().profile().diamond() +
-                         dungeon_config.GetInt("demo.dungeon_first_clear_diamond_reward", 50),
+                         stage_config.GetInt("demo.stage_first_clear_diamond_reward", 50),
                  "reload player should reflect diamond reward")) {
         return 1;
     }

@@ -18,6 +18,10 @@ std::vector<std::string> Split(const std::string& input, char separator) {
     return parts;
 }
 
+int ChapterIdFromStageId(int stage_id) {
+    return stage_id > 0 ? stage_id / 1000 : 0;
+}
+
 }  // namespace
 
 RedisPlayerCacheRepository RedisPlayerCacheRepository::FromConfig(common::redis::RedisClientPool& redis_pool,
@@ -56,9 +60,10 @@ bool RedisPlayerCacheRepository::Save(const common::model::PlayerState& player_s
          {"stamina", std::to_string(player_state.profile.stamina)},
          {"gold", std::to_string(player_state.profile.gold)},
          {"diamond", std::to_string(player_state.profile.diamond)},
-         {"main_progress", std::to_string(player_state.profile.main_progress)},
+         {"main_stage_id", std::to_string(player_state.profile.main_stage_id)},
+         {"main_chapter_id", std::to_string(player_state.profile.main_chapter_id)},
          {"fight_power", std::to_string(player_state.profile.fight_power)},
-         {"dungeon_progress", SerializeProgress(player_state)},
+         {"stage_progress", SerializeProgress(player_state)},
          {"currencies", currencies.str()},
          {"role_summaries", roles.str()}},
         ttl_seconds_);
@@ -81,9 +86,14 @@ std::optional<common::model::PlayerState> RedisPlayerCacheRepository::FindByPlay
     state.profile.stamina = std::stoi(values->at("stamina"));
     state.profile.gold = std::stoll(values->at("gold"));
     state.profile.diamond = std::stoll(values->at("diamond"));
-    state.profile.main_progress = std::stoi(values->at("main_progress"));
+    state.profile.main_stage_id = std::stoi(values->at("main_stage_id"));
+    if (const auto iter = values->find("main_chapter_id"); iter != values->end()) {
+        state.profile.main_chapter_id = std::stoi(iter->second);
+    } else {
+        state.profile.main_chapter_id = ChapterIdFromStageId(state.profile.main_stage_id);
+    }
     state.profile.fight_power = std::stoll(values->at("fight_power"));
-    state.dungeon_progress = ParseProgress(values->at("dungeon_progress"));
+    state.stage_progress = ParseProgress(values->at("stage_progress"));
     for (const auto& token : Split(values->at("currencies"), ';')) {
         const auto parts = Split(token, ':');
         if (parts.size() != 2) {
@@ -113,26 +123,26 @@ std::string RedisPlayerCacheRepository::CacheKey(std::int64_t player_id) {
 std::string RedisPlayerCacheRepository::SerializeProgress(const common::model::PlayerState& player_state) {
     std::ostringstream output;
     bool first = true;
-    for (const auto& progress : player_state.dungeon_progress) {
+    for (const auto& progress : player_state.stage_progress) {
         if (!first) {
             output << ';';
         }
-        output << progress.dungeon_id << ':' << progress.best_star << ':' << (progress.is_first_clear ? 1 : 0);
+        output << progress.stage_id << ':' << progress.best_star << ':' << (progress.is_first_clear ? 1 : 0);
         first = false;
     }
     return output.str();
 }
 
-std::vector<common::model::PlayerDungeonProgress> RedisPlayerCacheRepository::ParseProgress(const std::string& raw_value) {
-    std::vector<common::model::PlayerDungeonProgress> progress_list;
+std::vector<common::model::PlayerStageProgress> RedisPlayerCacheRepository::ParseProgress(const std::string& raw_value) {
+    std::vector<common::model::PlayerStageProgress> progress_list;
     for (const auto& token : Split(raw_value, ';')) {
         const auto parts = Split(token, ':');
         if (parts.size() != 3) {
             continue;
         }
 
-        common::model::PlayerDungeonProgress progress;
-        progress.dungeon_id = std::stoi(parts[0]);
+        common::model::PlayerStageProgress progress;
+        progress.stage_id = std::stoi(parts[0]);
         progress.best_star = std::stoi(parts[1]);
         progress.is_first_clear = parts[2] == "1";
         progress_list.push_back(progress);

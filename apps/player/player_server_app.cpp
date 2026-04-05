@@ -24,13 +24,14 @@ void FillProtoPlayerState(const common::model::PlayerState& state, game_backend:
     profile->set_diamond(state.profile.diamond);
     profile->set_server_id(state.profile.server_id);
     profile->set_nickname(state.profile.nickname);
-    profile->set_main_progress(state.profile.main_progress);
+    profile->set_main_stage_id(state.profile.main_stage_id);
+    profile->set_main_chapter_id(state.profile.main_chapter_id);
     profile->set_fight_power(state.profile.fight_power);
 
-    output->clear_dungeon_progress();
-    for (const auto& progress : state.dungeon_progress) {
-        auto* item = output->add_dungeon_progress();
-        item->set_dungeon_id(progress.dungeon_id);
+    output->clear_stage_progress();
+    for (const auto& progress : state.stage_progress) {
+        auto* item = output->add_stage_progress();
+        item->set_stage_id(progress.stage_id);
         item->set_best_star(progress.best_star);
         item->set_is_first_clear(progress.is_first_clear);
     }

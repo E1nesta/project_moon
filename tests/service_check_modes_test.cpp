@@ -104,7 +104,7 @@ bool WriteConfig(const std::filesystem::path& path,
                  int redis_port,
                  int login_port,
                  int player_port,
-                 int dungeon_port) {
+                 int battle_port) {
     std::ofstream output(path);
     if (!output.is_open()) {
         return false;
@@ -141,8 +141,8 @@ bool WriteConfig(const std::filesystem::path& path,
     output << "upstream.login.port=" << login_port << '\n';
     output << "upstream.player.host=127.0.0.1\n";
     output << "upstream.player.port=" << player_port << '\n';
-    output << "upstream.dungeon.host=127.0.0.1\n";
-    output << "upstream.dungeon.port=" << dungeon_port << '\n';
+    output << "upstream.battle.host=127.0.0.1\n";
+    output << "upstream.battle.port=" << battle_port << '\n';
     return true;
 }
 
@@ -161,8 +161,8 @@ int main(int /*argc*/, char* argv[]) {
     const auto redis_port = ReserveClosedPort();
     const auto login_port = ReserveClosedPort();
     const auto player_port = ReserveClosedPort();
-    const auto dungeon_port = ReserveClosedPort();
-    if (!Expect(mysql_port > 0 && redis_port > 0 && login_port > 0 && player_port > 0 && dungeon_port > 0,
+    const auto battle_port = ReserveClosedPort();
+    if (!Expect(mysql_port > 0 && redis_port > 0 && login_port > 0 && player_port > 0 && battle_port > 0,
                 "expected closed dependency ports to be reserved")) {
         return 1;
     }
@@ -179,7 +179,7 @@ int main(int /*argc*/, char* argv[]) {
                             redis_port,
                             login_port,
                             player_port,
-                            dungeon_port),
+                            battle_port),
                 "expected valid config to be written")) {
         return 1;
     }
@@ -190,7 +190,7 @@ int main(int /*argc*/, char* argv[]) {
                             redis_port,
                             login_port,
                             player_port,
-                            dungeon_port),
+                            battle_port),
                 "expected invalid config to be written")) {
         return 1;
     }

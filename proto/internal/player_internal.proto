@@ -9,8 +9,6 @@ service PlayerInternal {
   rpc PrepareBattleEntry(PrepareBattleEntryRequest) returns (PrepareBattleEntryResponse);
   rpc CancelBattleEntry(CancelBattleEntryRequest) returns (CancelBattleEntryResponse);
   rpc ApplyRewardGrant(ApplyRewardGrantRequest) returns (ApplyRewardGrantResponse);
-  rpc SpendStaminaForDungeonEnter(SpendStaminaForDungeonEnterRequest) returns (SpendStaminaForDungeonEnterResponse);
-  rpc ApplyDungeonSettlement(ApplyDungeonSettlementRequest) returns (ApplyDungeonSettlementResponse);
 }
 
 message GetPlayerSnapshotRequest {
@@ -72,16 +70,6 @@ message CancelBattleEntryResponse {
   bool success = 1;
 }
 
-message SpendStaminaForDungeonEnterRequest {
-  int64 player_id = 1;
-  string battle_id = 2;
-  int32 stamina_cost = 3;
-}
-
-message SpendStaminaForDungeonEnterResponse {
-  int32 remain_stamina = 1;
-}
-
 message SettlementReward {
   string reward_type = 1;
   int64 amount = 2;
@@ -97,18 +85,4 @@ message ApplyRewardGrantRequest {
 
 message ApplyRewardGrantResponse {
   repeated SettlementReward rewards = 1;
-}
-
-message ApplyDungeonSettlementRequest {
-  int64 player_id = 1;
-  string battle_id = 2;
-  int32 dungeon_id = 3;
-  int32 star = 4;
-  int64 normal_gold_reward = 5;
-  int64 first_clear_diamond_reward = 6;
-}
-
-message ApplyDungeonSettlementResponse {
-  bool first_clear = 1;
-  repeated SettlementReward rewards = 2;
 }

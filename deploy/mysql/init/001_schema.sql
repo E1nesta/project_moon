@@ -36,21 +36,21 @@ CREATE TABLE IF NOT EXISTS player_item (
     CONSTRAINT fk_item_player FOREIGN KEY (player_id) REFERENCES player(player_id)
 );
 
-CREATE TABLE IF NOT EXISTS player_dungeon (
+CREATE TABLE IF NOT EXISTS player_stage_progress (
     id BIGINT PRIMARY KEY AUTO_INCREMENT,
     player_id BIGINT NOT NULL,
-    dungeon_id INT NOT NULL,
+    stage_id INT NOT NULL,
     best_star INT NOT NULL DEFAULT 0,
     is_first_clear TINYINT NOT NULL DEFAULT 0,
     last_clear_at TIMESTAMP NULL DEFAULT NULL,
-    UNIQUE KEY uk_player_dungeon (player_id, dungeon_id),
-    CONSTRAINT fk_dungeon_player FOREIGN KEY (player_id) REFERENCES player(player_id)
+    UNIQUE KEY uk_player_stage_progress (player_id, stage_id),
+    CONSTRAINT fk_stage_progress_player FOREIGN KEY (player_id) REFERENCES player(player_id)
 );
 
-CREATE TABLE IF NOT EXISTS dungeon_battle (
+CREATE TABLE IF NOT EXISTS battle_session (
     battle_id VARCHAR(64) PRIMARY KEY,
     player_id BIGINT NOT NULL,
-    dungeon_id INT NOT NULL,
+    stage_id INT NOT NULL,
     status TINYINT NOT NULL DEFAULT 0,
     cost_stamina INT NOT NULL DEFAULT 0,
     enter_confirmed TINYINT NOT NULL DEFAULT 0,
@@ -78,7 +78,7 @@ CREATE TABLE IF NOT EXISTS player_action_log (
     operation_key VARCHAR(128) PRIMARY KEY,
     player_id BIGINT NOT NULL,
     operation_type VARCHAR(32) NOT NULL,
-    dungeon_id INT NOT NULL DEFAULT 0,
+    stage_id INT NOT NULL DEFAULT 0,
     stamina_delta INT NOT NULL DEFAULT 0,
     remain_stamina_after INT NOT NULL DEFAULT 0,
     gold_delta BIGINT NOT NULL DEFAULT 0,

@@ -19,12 +19,12 @@ GatewayForwardExecutor::GatewayForwardExecutor(Options options)
           options_.player.timeout_ms,
           options_.player.pool_size,
           options_.player.tls)),
-      dungeon_upstream_(std::make_unique<framework::transport::UpstreamClientPool>(
-          options_.dungeon.host,
-          options_.dungeon.port,
-          options_.dungeon.timeout_ms,
-          options_.dungeon.pool_size,
-          options_.dungeon.tls)) {}
+      battle_upstream_(std::make_unique<framework::transport::UpstreamClientPool>(
+          options_.battle.host,
+          options_.battle.port,
+          options_.battle.timeout_ms,
+          options_.battle.pool_size,
+          options_.battle.tls)) {}
 
 bool GatewayForwardExecutor::Start(std::string* error_message) {
     return executor_.Start(error_message);
@@ -102,7 +102,7 @@ framework::transport::UpstreamClientPool& GatewayForwardExecutor::ResolveUpstrea
     case common::net::MessageId::kEnterBattleRequest:
     case common::net::MessageId::kSettleBattleRequest:
     case common::net::MessageId::kGetRewardGrantStatusRequest:
-        return *dungeon_upstream_;
+        return *battle_upstream_;
     default:
         return *login_upstream_;
     }

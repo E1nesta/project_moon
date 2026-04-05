@@ -29,7 +29,7 @@ public:
         std::size_t queue_limit = 1024;
         UpstreamOptions login;
         UpstreamOptions player;
-        UpstreamOptions dungeon;
+        UpstreamOptions battle;
     };
 
     using Completion = std::function<void(bool success,
@@ -61,7 +61,7 @@ private:
     framework::execution::ShardedRequestExecutor executor_;
     std::unique_ptr<framework::transport::UpstreamClientPool> login_upstream_;
     std::unique_ptr<framework::transport::UpstreamClientPool> player_upstream_;
-    std::unique_ptr<framework::transport::UpstreamClientPool> dungeon_upstream_;
+    std::unique_ptr<framework::transport::UpstreamClientPool> battle_upstream_;
 };
 
 }  // namespace services::gateway
