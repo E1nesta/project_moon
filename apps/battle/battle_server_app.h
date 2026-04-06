@@ -29,6 +29,8 @@ private:
                                                  const common::net::Packet& packet) const;
     common::net::Packet HandleSettleBattleRequest(const framework::protocol::HandlerContext& context,
                                                   const common::net::Packet& packet) const;
+    common::net::Packet HandleGetActiveBattleRequest(const framework::protocol::HandlerContext& context,
+                                                     const common::net::Packet& packet) const;
     common::net::Packet HandleGetRewardGrantStatusRequest(const framework::protocol::HandlerContext& context,
                                                           const common::net::Packet& packet) const;
 

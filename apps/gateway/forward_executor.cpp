@@ -101,6 +101,7 @@ framework::transport::UpstreamClientPool& GatewayForwardExecutor::ResolveUpstrea
         return *player_upstream_;
     case common::net::MessageId::kEnterBattleRequest:
     case common::net::MessageId::kSettleBattleRequest:
+    case common::net::MessageId::kGetActiveBattleRequest:
     case common::net::MessageId::kGetRewardGrantStatusRequest:
         return *battle_upstream_;
     default:

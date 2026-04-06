@@ -21,6 +21,7 @@ namespace battle_server::battle {
 // Application model for the enter battle use case.
 struct EnterBattleRequest {
     std::int64_t player_id = 0;
+    std::uint64_t request_id = 0;
     int stage_id = 0;
     std::string mode = "pve";
 };
@@ -32,6 +33,7 @@ struct EnterBattleResponse {
     std::int64_t session_id = 0;
     int remain_stamina = 0;
     std::int64_t seed = 0;
+    std::string settle_token;
 };
 
 struct SettleBattleRequest {
@@ -41,6 +43,7 @@ struct SettleBattleRequest {
     int star = 0;
     int result_code = 1;
     std::int64_t client_score = 0;
+    std::string settle_token;
 };
 
 struct SettleBattleResponse {
@@ -61,6 +64,19 @@ struct RewardGrantStatusResponse {
     std::vector<common::model::Reward> rewards;
 };
 
+struct ActiveBattleResponse {
+    bool success = false;
+    common::error::ErrorCode error_code = common::error::ErrorCode::kOk;
+    std::string error_message;
+    bool found = false;
+    std::int64_t session_id = 0;
+    int stage_id = 0;
+    std::string mode;
+    int remain_stamina = 0;
+    std::int64_t seed = 0;
+    std::string settle_token;
+};
+
 // Application service that coordinates stage rules, locking and persistence boundaries.
 class BattleService {
 public:
@@ -68,16 +84,26 @@ public:
                    PlayerSnapshotPort& player_snapshot_port,
                    StageConfigRepository& stage_config_repository,
                    BattleRepository& battle_repository,
-                   BattleContextRepository& battle_context_repository);
+                   BattleContextRepository& battle_context_repository,
+                   std::uint16_t id_generator_node_id = 1,
+                   std::string settle_token_secret = "battle-settle-token");
 
     [[nodiscard]] EnterBattleResponse EnterBattle(const EnterBattleRequest& request, const std::string& trace_id);
     [[nodiscard]] SettleBattleResponse SettleBattle(const SettleBattleRequest& request, const std::string& trace_id);
-    [[nodiscard]] RewardGrantStatusResponse GetRewardGrantStatus(std::int64_t reward_grant_id) const;
+    [[nodiscard]] ActiveBattleResponse GetActiveBattle(std::int64_t player_id) const;
+    [[nodiscard]] RewardGrantStatusResponse GetRewardGrantStatus(std::int64_t player_id,
+                                                                 std::int64_t reward_grant_id) const;
 
 private:
     [[nodiscard]] std::optional<StageConfig> LoadStageConfig(int stage_id) const;
-    [[nodiscard]] std::optional<PlayerSnapshot> LoadPlayerSnapshot(std::int64_t player_id) const;
+    [[nodiscard]] GetBattleEntrySnapshotPortResponse LoadPlayerSnapshot(std::int64_t player_id) const;
     [[nodiscard]] std::optional<common::model::BattleContext> LoadBattleContext(std::int64_t session_id) const;
+    [[nodiscard]] bool RollbackBattleEntry(std::int64_t player_id,
+                                           std::int64_t session_id,
+                                           int energy_refund,
+                                           int expected_stamina_after_rollback,
+                                           const std::string& entry_idempotency_key,
+                                           std::string* error_message) const;
     [[nodiscard]] std::optional<EnterBattleResponse> ValidateEnterRequirements(
         const PlayerSnapshot& player_snapshot,
         const StageConfig& stage_config) const;
@@ -87,6 +113,10 @@ private:
     [[nodiscard]] std::optional<SettleBattleResponse> ValidateBattleContext(
         const SettleBattleRequest& request,
         const common::model::BattleContext& battle_context) const;
+    [[nodiscard]] std::string BuildSettleToken(std::int64_t player_id,
+                                               std::int64_t session_id,
+                                               int stage_id,
+                                               std::int64_t seed) const;
     [[nodiscard]] common::error::ErrorCode MapEnterStorageError(BattleRepositoryError error) const;
     [[nodiscard]] common::error::ErrorCode MapSettleStorageError(BattleRepositoryError error) const;
     [[nodiscard]] bool AcquirePlayerLock(std::int64_t player_id);
@@ -98,6 +128,7 @@ private:
     BattleRepository& battle_repository_;
     BattleContextRepository& battle_context_repository_;
     common::id::IdGenerator id_generator_;
+    std::string settle_token_secret_;
 };
 
 }  // namespace battle_server::battle

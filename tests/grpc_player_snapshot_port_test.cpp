@@ -92,17 +92,19 @@ int main() {
         framework::grpc::CreateInsecureChannel(client_config, "grpc.client.player_internal."));
 
     const auto snapshot = port.GetBattleEntrySnapshot(20001);
-    if (!Expect(snapshot.has_value(), "expected grpc snapshot port to load existing player")) {
+    if (!Expect(snapshot.success && snapshot.found, "expected grpc snapshot port to load existing player")) {
         server_runner.Shutdown();
         return 1;
     }
-    if (!Expect(snapshot->level == 10 && snapshot->stamina == 120, "expected grpc snapshot values to match")) {
+    if (!Expect(snapshot.snapshot.level == 10 && snapshot.snapshot.stamina == 120,
+                "expected grpc snapshot values to match")) {
         server_runner.Shutdown();
         return 1;
     }
 
     const auto missing_snapshot = port.GetBattleEntrySnapshot(99999);
-    if (!Expect(!missing_snapshot.has_value(), "expected missing player snapshot to return nullopt")) {
+    if (!Expect(missing_snapshot.success && !missing_snapshot.found,
+                "expected missing player snapshot to return found=false")) {
         server_runner.Shutdown();
         return 1;
     }
@@ -147,6 +149,12 @@ int main() {
     const auto unavailable_config = BuildGrpcClientConfig(unavailable_port_number);
     battle_server::battle::GrpcPlayerSnapshotPort unavailable_port(
         framework::grpc::CreateInsecureChannel(unavailable_config, "grpc.client.player_internal."));
+    const auto unavailable_snapshot = unavailable_port.GetBattleEntrySnapshot(20001);
+    if (!Expect(!unavailable_snapshot.success &&
+                    unavailable_snapshot.error_code == common::error::ErrorCode::kStorageError,
+                "expected grpc GetBattleEntrySnapshot failures to map to storage error")) {
+        return 1;
+    }
     if (!Expect(!unavailable_port.InvalidatePlayerSnapshot(20001),
                 "expected grpc invalidation failures to map to false")) {
         return 1;

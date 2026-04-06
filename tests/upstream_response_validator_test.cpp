@@ -30,6 +30,24 @@ common::net::Packet BuildUnexpectedResponse(const common::net::RequestContext& c
     return common::net::BuildPingResponsePacket(context, "pong");
 }
 
+common::net::Packet BuildLoadPlayerResponsePacket(const common::net::RequestContext& context) {
+    game_backend::proto::LoadPlayerResponse response;
+    common::net::FillProto(context, response.mutable_context());
+    return common::net::BuildPacket(common::net::MessageId::kLoadPlayerResponse, context.request_id, response);
+}
+
+common::net::Packet BuildLoginResponsePacket(const common::net::RequestContext& context,
+                                             const std::string& auth_token,
+                                             std::int64_t account_id,
+                                             std::int64_t player_id) {
+    game_backend::proto::LoginResponse response;
+    common::net::FillProto(context, response.mutable_context());
+    response.set_auth_token(auth_token);
+    response.set_account_id(account_id);
+    response.set_player_id(player_id);
+    return common::net::BuildPacket(common::net::MessageId::kLoginResponse, context.request_id, response);
+}
+
 }  // namespace
 
 int main() {
@@ -82,6 +100,57 @@ int main() {
     if (!Expect(static_cast<common::error::ErrorCode>(error_response.error_code()) ==
                     common::error::ErrorCode::kUpstreamResponseInvalid,
                 "request id mismatch should map to UPSTREAM_RESPONSE_INVALID")) {
+        return 1;
+    }
+
+    context.request.auth_token = "session-token";
+    context.request.player_id = 20001;
+    context.request.account_id = 10001;
+
+    common::net::RequestContext mismatched_response_context = context.request;
+    mismatched_response_context.player_id = 20002;
+    const auto mismatched_context_response = validator.Validate(common::net::MessageId::kLoadPlayerRequest,
+                                                                context,
+                                                                request_packet,
+                                                                BuildLoadPlayerResponsePacket(mismatched_response_context));
+    if (!Expect(common::net::ParseMessage(mismatched_context_response.body, &error_response),
+                "response context mismatch should parse as ErrorResponse")) {
+        return 1;
+    }
+    if (!Expect(static_cast<common::error::ErrorCode>(error_response.error_code()) ==
+                    common::error::ErrorCode::kUpstreamResponseInvalid,
+                "response context mismatch should map to UPSTREAM_RESPONSE_INVALID")) {
+        return 1;
+    }
+
+    framework::protocol::HandlerContext login_context;
+    login_context.connection_id = 43;
+    login_context.request.request_id = 9;
+    login_context.request.trace_id = "trace-9";
+    login_context.message_id = common::net::MessageId::kLoginRequest;
+
+    common::net::Packet login_request_packet;
+    login_request_packet.header.request_id = 9;
+    login_request_packet.header.msg_id = static_cast<std::uint32_t>(common::net::MessageId::kLoginRequest);
+
+    common::net::RequestContext invalid_login_response_context;
+    invalid_login_response_context.request_id = 9;
+    invalid_login_response_context.trace_id = "trace-9";
+    invalid_login_response_context.auth_token = "context-token";
+    invalid_login_response_context.account_id = 10001;
+    invalid_login_response_context.player_id = 20001;
+    const auto invalid_login_response = validator.Validate(common::net::MessageId::kLoginRequest,
+                                                           login_context,
+                                                           login_request_packet,
+                                                           BuildLoginResponsePacket(
+                                                               invalid_login_response_context, "body-token", 10001, 20001));
+    if (!Expect(common::net::ParseMessage(invalid_login_response.body, &error_response),
+                "login response context mismatch should parse as ErrorResponse")) {
+        return 1;
+    }
+    if (!Expect(static_cast<common::error::ErrorCode>(error_response.error_code()) ==
+                    common::error::ErrorCode::kUpstreamResponseInvalid,
+                "login response context mismatch should map to UPSTREAM_RESPONSE_INVALID")) {
         return 1;
     }
 

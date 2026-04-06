@@ -128,7 +128,7 @@ PrepareBattleEntryResponse PlayerService::PrepareBattleEntry(std::int64_t player
         return {false, MapMutationError(result.error), result.error_message, 0};
     }
 
-    InvalidatePlayerCacheBestEffort(player_id);
+    RefreshPlayerCacheBestEffort(player_id);
     return {true, common::error::ErrorCode::kOk, "", result.remain_energy};
 }
 
@@ -141,7 +141,7 @@ CancelBattleEntryResponse PlayerService::CancelBattleEntry(std::int64_t player_i
         return {false, MapMutationError(result.error), result.error_message};
     }
 
-    InvalidatePlayerCacheBestEffort(player_id);
+    RefreshPlayerCacheBestEffort(player_id);
     return {true, common::error::ErrorCode::kOk, ""};
 }
 
@@ -155,7 +155,7 @@ ApplyRewardGrantResponse PlayerService::ApplyRewardGrant(std::int64_t player_id,
         return {false, MapMutationError(result.error), result.error_message, {}};
     }
 
-    InvalidatePlayerCacheBestEffort(player_id);
+    RefreshPlayerCacheBestEffort(player_id);
     return {true, common::error::ErrorCode::kOk, "", result.applied_currencies};
 }
 
@@ -172,14 +172,21 @@ LoadPlayerResponse PlayerService::BuildLoadSuccess(const common::model::PlayerSt
     return BuildLoadPlayerSuccess(player_state, loaded_from_cache);
 }
 
-void PlayerService::InvalidatePlayerCacheBestEffort(std::int64_t player_id) const {
-    if (player_cache_repository_.Invalidate(player_id)) {
+void PlayerService::RefreshPlayerCacheBestEffort(std::int64_t player_id) const {
+    if (const auto player_state = LoadPlayerFromStorage(player_id); player_state.has_value()) {
+        if (player_cache_repository_.Save(*player_state)) {
+            return;
+        }
+        if (player_cache_repository_.Invalidate(player_id)) {
+            return;
+        }
+    } else if (player_cache_repository_.Invalidate(player_id)) {
         return;
     }
 
     common::log::Logger::Instance().Log(
         common::log::LogLevel::kWarn,
-        "player cache invalidation failed after mutation for player_id=" + std::to_string(player_id));
+        "player cache refresh failed after mutation for player_id=" + std::to_string(player_id));
 }
 
 }  // namespace game_server::player

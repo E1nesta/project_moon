@@ -34,10 +34,14 @@ public:
     explicit LocalPlayerSnapshotPort(game_server::player::PlayerService& player_service)
         : player_service_(player_service) {}
 
-    std::optional<battle_server::battle::PlayerSnapshot> GetBattleEntrySnapshot(std::int64_t player_id) const override {
+    battle_server::battle::GetBattleEntrySnapshotPortResponse GetBattleEntrySnapshot(
+        std::int64_t player_id) const override {
         const auto response = player_service_.GetBattleEntrySnapshot(player_id);
-        if (!response.success || !response.found) {
-            return std::nullopt;
+        if (!response.success) {
+            return {false, false, response.error_code, response.error_message, {}};
+        }
+        if (!response.found) {
+            return {true, false, common::error::ErrorCode::kOk, "", {}};
         }
 
         battle_server::battle::PlayerSnapshot snapshot;
@@ -49,7 +53,7 @@ public:
             snapshot.role_summaries.push_back(
                 {role_summary.role_id, role_summary.level, role_summary.star});
         }
-        return snapshot;
+        return {true, true, common::error::ErrorCode::kOk, "", snapshot};
     }
 
     bool InvalidatePlayerSnapshot(std::int64_t player_id) override {
@@ -353,7 +357,7 @@ int main(int argc, char* argv[]) {
     }
 
     const auto enter_response = battle_service.EnterBattle(
-        {login_response.default_player_id, demo_data.stage_id, "pve"}, "demo-flow-enter");
+        {login_response.default_player_id, 10001, demo_data.stage_id, "pve"}, "demo-flow-enter");
     if (!Require(enter_response.success,
                  "enter battle failed: " + FormatError(enter_response.error_code, enter_response.error_message))) {
         return 1;
@@ -366,8 +370,22 @@ int main(int argc, char* argv[]) {
     enter_entry.Add("remain_stamina", static_cast<std::int64_t>(enter_response.remain_stamina));
     EmitToolLog(common::log::LogLevel::kInfo, enter_entry);
 
+    const auto active_battle = battle_service.GetActiveBattle(login_response.default_player_id);
+    if (!Require(active_battle.success && active_battle.found,
+                 "get active battle failed: " + FormatError(active_battle.error_code, active_battle.error_message)) ||
+        !Require(active_battle.session_id == enter_response.session_id,
+                 "active battle should return the same session_id after enter")) {
+        return 1;
+    }
+
     const auto settle_response = battle_service.SettleBattle(
-        {login_response.default_player_id, enter_response.session_id, demo_data.stage_id, 3, 1, 123456},
+        {login_response.default_player_id,
+         enter_response.session_id,
+         demo_data.stage_id,
+         3,
+         1,
+         123456,
+         enter_response.settle_token},
         "demo-flow-settle");
     if (!Require(settle_response.success,
                  "settle battle failed: " + FormatError(settle_response.error_code, settle_response.error_message))) {
@@ -383,32 +401,37 @@ int main(int argc, char* argv[]) {
     EmitToolLog(common::log::LogLevel::kInfo, settle_entry);
     LogRewards(settle_response.reward_preview);
 
-    const auto grant_status = battle_service.GetRewardGrantStatus(settle_response.reward_grant_id);
-    if (!Require(grant_status.success,
-                 "get reward grant status failed: " +
-                     FormatError(grant_status.error_code, grant_status.error_message))) {
-        return 1;
-    }
+    if (options.run_negative_cases) {
+        const auto grant_status =
+            battle_service.GetRewardGrantStatus(login_response.default_player_id, settle_response.reward_grant_id);
+        if (!Require(grant_status.success,
+                     "get reward grant status failed: " +
+                         FormatError(grant_status.error_code, grant_status.error_message))) {
+            return 1;
+        }
 
-    auto grant_entry = NewToolEvent("demo_flow_reward_grant_status_observed");
-    grant_entry.Add("reward_grant_id", grant_status.reward_grant_id);
-    grant_entry.Add("grant_status", static_cast<std::int64_t>(grant_status.grant_status));
-    EmitToolLog(common::log::LogLevel::kInfo, grant_entry);
+        auto grant_entry = NewToolEvent("demo_flow_reward_grant_status_observed");
+        grant_entry.Add("reward_grant_id", grant_status.reward_grant_id);
+        grant_entry.Add("grant_status", static_cast<std::int64_t>(grant_status.grant_status));
+        EmitToolLog(common::log::LogLevel::kInfo, grant_entry);
+
+        if (!Require(grant_status.grant_status == 1, "reward grant should be completed synchronously")) {
+            return 1;
+        }
+    }
 
     const auto refreshed_player = player_service.LoadPlayer(login_response.default_player_id);
     if (!Require(refreshed_player.success,
                  "reload player failed: " + FormatError(refreshed_player.error_code, refreshed_player.error_message)) ||
-        !Require(grant_status.grant_status == 1, "reward grant should be completed synchronously") ||
+        !Require(settle_response.grant_status == 1, "settle battle should complete reward synchronously") ||
         !Require(refreshed_player.player_state.profile.stamina == enter_response.remain_stamina,
                  "reload player should reflect stamina consumption") ||
         !Require(refreshed_player.player_state.profile.gold ==
                      player_response.player_state.profile.gold +
                          stage_config.GetInt("demo.stage_normal_gold_reward", 100),
                  "reload player should reflect gold reward") ||
-        !Require(refreshed_player.player_state.profile.diamond ==
-                     player_response.player_state.profile.diamond +
-                         stage_config.GetInt("demo.stage_first_clear_diamond_reward", 50),
-                 "reload player should reflect diamond reward")) {
+        !Require(refreshed_player.player_state.profile.diamond == player_response.player_state.profile.diamond,
+                 "reload player should not mint diamond from client-reported star")) {
         return 1;
     }
 
@@ -427,7 +450,13 @@ int main(int argc, char* argv[]) {
         }
 
         const auto duplicate_settle = battle_service.SettleBattle(
-            {login_response.default_player_id, enter_response.session_id, demo_data.stage_id, 3, 1, 123456},
+            {login_response.default_player_id,
+             enter_response.session_id,
+             demo_data.stage_id,
+             3,
+             1,
+             123456,
+             enter_response.settle_token},
             "demo-flow-settle-replay");
         if (!Require(duplicate_settle.success &&
                          duplicate_settle.reward_grant_id == settle_response.reward_grant_id,
@@ -436,7 +465,7 @@ int main(int argc, char* argv[]) {
         }
 
         const auto invalid_star_enter = battle_service.EnterBattle(
-            {login_response.default_player_id, demo_data.stage_id, "pve"}, "demo-flow-invalid-enter");
+            {login_response.default_player_id, 10002, demo_data.stage_id, "pve"}, "demo-flow-invalid-enter");
         if (!Require(invalid_star_enter.success,
                      "second enter battle failed: " +
                          FormatError(invalid_star_enter.error_code, invalid_star_enter.error_message))) {
@@ -444,7 +473,13 @@ int main(int argc, char* argv[]) {
         }
 
         const auto invalid_star_settle = battle_service.SettleBattle(
-            {login_response.default_player_id, invalid_star_enter.session_id, demo_data.stage_id, 99, 1, 1},
+            {login_response.default_player_id,
+             invalid_star_enter.session_id,
+             demo_data.stage_id,
+             99,
+             1,
+             1,
+             invalid_star_enter.settle_token},
             "demo-flow-invalid-settle");
         if (!Require(!invalid_star_settle.success &&
                          invalid_star_settle.error_code == common::error::ErrorCode::kInvalidStar,
@@ -453,7 +488,13 @@ int main(int argc, char* argv[]) {
         }
 
         const auto cleanup_settle = battle_service.SettleBattle(
-            {login_response.default_player_id, invalid_star_enter.session_id, demo_data.stage_id, 1, 1, 321},
+            {login_response.default_player_id,
+             invalid_star_enter.session_id,
+             demo_data.stage_id,
+             1,
+             1,
+             321,
+             invalid_star_enter.settle_token},
             "demo-flow-cleanup-settle");
         if (!Require(cleanup_settle.success,
                      "cleanup settle failed: " +

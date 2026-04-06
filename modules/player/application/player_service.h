@@ -98,7 +98,7 @@ private:
     [[nodiscard]] std::optional<common::model::PlayerState> LoadPlayerFromStorage(std::int64_t player_id) const;
     [[nodiscard]] LoadPlayerResponse BuildLoadSuccess(const common::model::PlayerState& player_state,
                                                       bool loaded_from_cache) const;
-    void InvalidatePlayerCacheBestEffort(std::int64_t player_id) const;
+    void RefreshPlayerCacheBestEffort(std::int64_t player_id) const;
 
     PlayerRepository& player_repository_;
     PlayerCacheRepository& player_cache_repository_;

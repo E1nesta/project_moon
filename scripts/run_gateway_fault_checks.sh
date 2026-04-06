@@ -79,7 +79,7 @@ COMPOSE_BUILD="${COMPOSE_BUILD:-0}" up_stack
 compose_cmd stop gateway_1 >/dev/null
 mark_stopped gateway_1
 FAILOVER_MARK="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
-run_with_retry 3 run_demo_client --happy-path-only --skip-session-recovery
+CLIENT_TIMEOUT_MS=5000 run_with_retry 5 run_demo_client --happy-path-only --skip-session-recovery
 if ! compose_cmd logs gateway_2 --since "$FAILOVER_MARK" | grep -q "forwarding request to upstream"; then
   echo "failover check did not observe traffic on gateway_2 after gateway_1 was stopped" >&2
   exit 1
@@ -107,7 +107,7 @@ fi
 
 LOGIN_GATEWAY=""
 for service in gateway_1 gateway_2; do
-  if compose_cmd logs "$service" --since "$LOGIN_MARK" | grep -Eq "event=gateway_forward_(started|succeeded).*upstream_service=login"; then
+  if compose_cmd logs "$service" --since "$LOGIN_MARK" | grep -Eq "event=gateway_forward_(started|succeeded).*upstream\.service=login"; then
     LOGIN_GATEWAY="$service"
     break
   fi

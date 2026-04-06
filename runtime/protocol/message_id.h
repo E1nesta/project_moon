@@ -19,6 +19,8 @@ enum class MessageId : std::uint32_t {
     kSettleBattleResponse = 1204,
     kGetRewardGrantStatusRequest = 1205,
     kGetRewardGrantStatusResponse = 1206,
+    kGetActiveBattleRequest = 1207,
+    kGetActiveBattleResponse = 1208,
     kErrorResponse = 9000,
 };
 
@@ -48,6 +50,10 @@ inline std::optional<MessageId> MessageIdFromInt(std::uint32_t value) {
         return MessageId::kGetRewardGrantStatusRequest;
     case 1206:
         return MessageId::kGetRewardGrantStatusResponse;
+    case 1207:
+        return MessageId::kGetActiveBattleRequest;
+    case 1208:
+        return MessageId::kGetActiveBattleResponse;
     case 9000:
         return MessageId::kErrorResponse;
     default:
@@ -81,6 +87,10 @@ inline std::string_view ToString(MessageId message_id) {
         return "GET_REWARD_GRANT_STATUS_REQUEST";
     case MessageId::kGetRewardGrantStatusResponse:
         return "GET_REWARD_GRANT_STATUS_RESPONSE";
+    case MessageId::kGetActiveBattleRequest:
+        return "GET_ACTIVE_BATTLE_REQUEST";
+    case MessageId::kGetActiveBattleResponse:
+        return "GET_ACTIVE_BATTLE_RESPONSE";
     case MessageId::kErrorResponse:
         return "ERROR_RESPONSE";
     }
@@ -102,6 +112,8 @@ inline std::optional<MessageId> ExpectedResponseMessageId(MessageId request_id) 
         return MessageId::kSettleBattleResponse;
     case MessageId::kGetRewardGrantStatusRequest:
         return MessageId::kGetRewardGrantStatusResponse;
+    case MessageId::kGetActiveBattleRequest:
+        return MessageId::kGetActiveBattleResponse;
     default:
         return std::nullopt;
     }

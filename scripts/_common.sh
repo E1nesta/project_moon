@@ -116,8 +116,20 @@ run_demo_client() {
   if [[ "$DEPLOY_PROFILE" == "delivery" ]]; then
     compose_cmd exec -T gateway_1 ./demo_client --config-profile delivery "$@"
   else
+    ACCOUNT_MYSQL_HOST=127.0.0.1 \
+    ACCOUNT_MYSQL_PORT=3307 \
+    PLAYER_MYSQL_HOST=127.0.0.1 \
+    PLAYER_MYSQL_PORT=3307 \
+    BATTLE_MYSQL_HOST=127.0.0.1 \
+    BATTLE_MYSQL_PORT=3307 \
     MYSQL_HOST=127.0.0.1 \
     MYSQL_PORT=3307 \
+    ACCOUNT_REDIS_HOST=127.0.0.1 \
+    ACCOUNT_REDIS_PORT=6379 \
+    PLAYER_REDIS_HOST=127.0.0.1 \
+    PLAYER_REDIS_PORT=6379 \
+    BATTLE_REDIS_HOST=127.0.0.1 \
+    BATTLE_REDIS_PORT=6379 \
     REDIS_HOST=127.0.0.1 \
     REDIS_PORT=6379 \
     "$(build_dir)/demo_client" --config-profile demo "$@"

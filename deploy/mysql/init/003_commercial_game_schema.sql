@@ -362,6 +362,38 @@ CREATE TABLE IF NOT EXISTS battle_month_registry (
     created_at DATETIME(3) NOT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
+CREATE TABLE IF NOT EXISTS battle_enter_operation (
+    idempotency_key VARCHAR(64) PRIMARY KEY,
+    player_id BIGINT NOT NULL,
+    stage_id INT NOT NULL,
+    mode VARCHAR(16) NOT NULL,
+    session_id BIGINT NOT NULL,
+    seed BIGINT NOT NULL,
+    remain_energy_after INT NOT NULL DEFAULT 0,
+    status TINYINT NOT NULL DEFAULT 0,
+    error_code INT NOT NULL DEFAULT 0,
+    error_message VARCHAR(255) NOT NULL DEFAULT '',
+    created_at DATETIME(3) NOT NULL,
+    updated_at DATETIME(3) NOT NULL,
+    KEY idx_player_status (player_id, status),
+    KEY idx_session_id (session_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+CREATE TABLE IF NOT EXISTS battle_active_session (
+    player_id BIGINT PRIMARY KEY,
+    session_id BIGINT NOT NULL,
+    stage_id INT NOT NULL,
+    mode VARCHAR(16) NOT NULL,
+    cost_energy INT NOT NULL DEFAULT 0,
+    remain_energy_after INT NOT NULL DEFAULT 0,
+    seed BIGINT NOT NULL,
+    idempotency_key VARCHAR(64) NOT NULL,
+    created_at DATETIME(3) NOT NULL,
+    UNIQUE KEY uk_session_id (session_id),
+    UNIQUE KEY uk_idempotency (idempotency_key),
+    KEY idx_created_at (created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
 DELIMITER $$
 
 DROP PROCEDURE IF EXISTS create_battle_month_tables $$
@@ -378,9 +410,11 @@ BEGIN
         'seed BIGINT NOT NULL,',
         'cost_energy INT NOT NULL DEFAULT 0,',
         'remain_energy_after INT NOT NULL DEFAULT 0,',
+        'active_player_id BIGINT NULL,',
         'start_time DATETIME(3) NOT NULL,',
         'end_time DATETIME(3) NULL,',
         'status TINYINT NOT NULL DEFAULT 0,',
+        'UNIQUE KEY uk_active_player (active_player_id),',
         'KEY idx_player_time (player_id, start_time),',
         'KEY idx_stage_time (stage_id, start_time)',
         ') ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci'

@@ -9,6 +9,10 @@ namespace services::player {
 
 namespace {
 
+bool RequestPlayerMatchesContext(const framework::protocol::HandlerContext& context, std::int64_t request_player_id) {
+    return request_player_id == 0 || request_player_id == context.request.player_id;
+}
+
 void FillProtoPlayerState(const common::model::PlayerState& state, game_backend::proto::PlayerState* output) {
     if (output == nullptr) {
         return;
@@ -98,14 +102,24 @@ void PlayerServerApp::RegisterRoutes() {
 
 common::net::Packet PlayerServerApp::HandleLoadPlayerRequest(const framework::protocol::HandlerContext& context,
                                                              const common::net::Packet& packet) const {
-    return framework::protocol::HandleParsedRequest<game_backend::proto::LoadPlayerRequest>(
-        context,
-        packet,
-        "invalid load player request",
-        [this, &context](const game_backend::proto::LoadPlayerRequest& /*request*/) {
-            return player_service_->LoadPlayer(context.request.player_id);
-        },
-        BuildLoadPlayerResponsePacket);
+    game_backend::proto::LoadPlayerRequest request;
+    common::net::Packet error_response;
+    if (!framework::protocol::ParseProtoRequest(
+            context, packet, "invalid load player request", &request, &error_response)) {
+        return error_response;
+    }
+    if (!RequestPlayerMatchesContext(context, request.player_id())) {
+        return framework::protocol::BuildErrorResponse(
+            context.request,
+            common::error::ErrorCode::kRequestContextInvalid,
+            "request player_id does not match authenticated session");
+    }
+
+    const auto result = player_service_->LoadPlayer(context.request.player_id);
+    if (!result.success) {
+        return framework::protocol::BuildErrorResponse(context.request, result.error_code, result.error_message);
+    }
+    return BuildLoadPlayerResponsePacket(context, result);
 }
 
 }  // namespace services::player

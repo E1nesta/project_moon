@@ -316,6 +316,16 @@ bool ResetDemoState(common::mysql::MySqlClient& player_mysql,
         return false;
     }
     if (!ExecuteSql(battle_mysql,
+                    "DELETE FROM battle_active_session WHERE player_id = " + std::to_string(config.player_id),
+                    error_message)) {
+        return false;
+    }
+    if (!ExecuteSql(battle_mysql,
+                    "DELETE FROM battle_enter_operation WHERE player_id = " + std::to_string(config.player_id),
+                    error_message)) {
+        return false;
+    }
+    if (!ExecuteSql(battle_mysql,
                     "DELETE FROM " + SessionTable() + " WHERE player_id = " + std::to_string(config.player_id),
                     error_message)) {
         return false;

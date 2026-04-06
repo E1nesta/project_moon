@@ -35,5 +35,6 @@ Packet BuildErrorPacket(const RequestContext& context,
 Packet BuildPingResponsePacket(const RequestContext& context, const std::string& message);
 
 bool ExtractRequestContext(MessageId message_id, const std::string& body, RequestContext* context);
+bool ExtractResponseContext(MessageId message_id, const std::string& body, RequestContext* context);
 
 }  // namespace common::net

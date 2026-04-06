@@ -13,9 +13,9 @@ constexpr auto kRpcTimeout = std::chrono::milliseconds(2000);
 GrpcPlayerSnapshotPort::GrpcPlayerSnapshotPort(std::shared_ptr<::grpc::Channel> channel)
     : stub_(game_backend::internal::player::PlayerInternal::NewStub(std::move(channel))) {}
 
-std::optional<PlayerSnapshot> GrpcPlayerSnapshotPort::GetBattleEntrySnapshot(std::int64_t player_id) const {
+GetBattleEntrySnapshotPortResponse GrpcPlayerSnapshotPort::GetBattleEntrySnapshot(std::int64_t player_id) const {
     if (player_id <= 0 || stub_ == nullptr) {
-        return std::nullopt;
+        return {false, false, common::error::ErrorCode::kStorageError, "player snapshot port unavailable", {}};
     }
 
     game_backend::internal::player::GetBattleEntrySnapshotRequest request;
@@ -24,8 +24,11 @@ std::optional<PlayerSnapshot> GrpcPlayerSnapshotPort::GetBattleEntrySnapshot(std
     ::grpc::ClientContext context;
     context.set_deadline(std::chrono::system_clock::now() + kRpcTimeout);
     const auto status = stub_->GetBattleEntrySnapshot(&context, request, &response);
-    if (!status.ok() || !response.found()) {
-        return std::nullopt;
+    if (!status.ok()) {
+        return {false, false, common::error::ErrorCode::kStorageError, status.error_message(), {}};
+    }
+    if (!response.found()) {
+        return {true, false, common::error::ErrorCode::kOk, "", {}};
     }
 
     PlayerSnapshot snapshot;
@@ -35,7 +38,7 @@ std::optional<PlayerSnapshot> GrpcPlayerSnapshotPort::GetBattleEntrySnapshot(std
     for (const auto& role_summary : response.role_summaries()) {
         snapshot.role_summaries.push_back({role_summary.role_id(), role_summary.level(), role_summary.star()});
     }
-    return snapshot;
+    return {true, true, common::error::ErrorCode::kOk, "", snapshot};
 }
 
 bool GrpcPlayerSnapshotPort::InvalidatePlayerSnapshot(std::int64_t player_id) {

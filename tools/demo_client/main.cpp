@@ -548,20 +548,82 @@ int main(int argc, char* argv[]) {
     enter_request.set_player_id(login_response.player_id());
     enter_request.set_stage_id(demo_data.stage_id);
     enter_request.set_mode("pve");
+    const auto enter_request_id = request_id++;
     const auto enter_call = SendMessage(*active_client,
                                         common::net::MessageId::kEnterBattleRequest,
-                                        BuildContext(request_id++, login_response.auth_token(), login_response.player_id()),
+                                        BuildContext(enter_request_id, login_response.auth_token(), login_response.player_id()),
                                         &enter_request);
     if (options.expected_enter_error.has_value()) {
         return RequireExpectedError(enter_call, *options.expected_enter_error, "enter battle request") ? 0 : 1;
     }
-    if (!Require(enter_call.ok, "enter battle failed: " + FormatError(enter_call.error_code, enter_call.error_message))) {
-        return 1;
-    }
 
     game_backend::proto::EnterBattleResponse enter_response;
-    if (!Require(common::net::ParseMessage(enter_call.packet.body, &enter_response), "failed to parse enter battle response")) {
-        return 1;
+    if (enter_call.ok) {
+        if (!Require(common::net::ParseMessage(enter_call.packet.body, &enter_response), "failed to parse enter battle response")) {
+            return 1;
+        }
+    } else {
+        const bool should_recover = enter_call.error_code == common::error::ErrorCode::kUpstreamTimeout ||
+                                    enter_call.error_code == common::error::ErrorCode::kServiceUnavailable;
+        if (!Require(should_recover,
+                     "enter battle failed: " + FormatError(enter_call.error_code, enter_call.error_message))) {
+            return 1;
+        }
+
+        auto recover_entry = NewToolEvent("demo_client_enter_battle_recovering");
+        recover_entry.Add("request_id", static_cast<std::int64_t>(enter_request_id));
+        recover_entry.Add("error_code", std::string(common::error::ToString(enter_call.error_code)));
+        EmitToolLog(common::log::LogLevel::kWarn, recover_entry);
+
+        game_backend::proto::GetActiveBattleRequest recover_request;
+        recover_request.set_player_id(login_response.player_id());
+        const auto recover_call = SendMessage(*active_client,
+                                              common::net::MessageId::kGetActiveBattleRequest,
+                                              BuildContext(request_id++, login_response.auth_token(), login_response.player_id()),
+                                              &recover_request);
+        if (!Require(recover_call.ok,
+                     "get active battle during recovery failed: " +
+                         FormatError(recover_call.error_code, recover_call.error_message))) {
+            return 1;
+        }
+
+        game_backend::proto::GetActiveBattleResponse recover_response;
+        if (!Require(common::net::ParseMessage(recover_call.packet.body, &recover_response),
+                     "failed to parse recovery get active battle response")) {
+            return 1;
+        }
+
+        if (recover_response.found()) {
+            enter_response.set_session_id(recover_response.session_id());
+            enter_response.set_remain_stamina(recover_response.remain_stamina());
+            enter_response.set_seed(recover_response.seed());
+            enter_response.set_settle_token(recover_response.settle_token());
+
+            auto recovered_entry = NewToolEvent("demo_client_enter_battle_recovered");
+            recovered_entry.Add("strategy", "get_active_battle");
+            recovered_entry.Add("session_id", recover_response.session_id());
+            EmitToolLog(common::log::LogLevel::kInfo, recovered_entry);
+        } else {
+            const auto retry_enter_call = SendMessage(*active_client,
+                                                      common::net::MessageId::kEnterBattleRequest,
+                                                      BuildContext(
+                                                          enter_request_id, login_response.auth_token(), login_response.player_id()),
+                                                      &enter_request);
+            if (!Require(retry_enter_call.ok,
+                         "enter battle retry failed: " +
+                             FormatError(retry_enter_call.error_code, retry_enter_call.error_message))) {
+                return 1;
+            }
+            if (!Require(common::net::ParseMessage(retry_enter_call.packet.body, &enter_response),
+                         "failed to parse enter battle retry response")) {
+                return 1;
+            }
+
+            auto recovered_entry = NewToolEvent("demo_client_enter_battle_recovered");
+            recovered_entry.Add("strategy", "retry_same_request_id");
+            recovered_entry.Add("session_id", enter_response.session_id());
+            EmitToolLog(common::log::LogLevel::kInfo, recovered_entry);
+        }
     }
 
     auto enter_entry = NewToolEvent("demo_client_enter_battle_succeeded");
@@ -571,6 +633,26 @@ int main(int argc, char* argv[]) {
     enter_entry.Add("remain_stamina", static_cast<std::int64_t>(enter_response.remain_stamina()));
     EmitToolLog(common::log::LogLevel::kInfo, enter_entry);
 
+    game_backend::proto::GetActiveBattleRequest active_battle_request;
+    active_battle_request.set_player_id(login_response.player_id());
+    const auto active_battle_call = SendMessage(*active_client,
+                                                common::net::MessageId::kGetActiveBattleRequest,
+                                                BuildContext(request_id++, login_response.auth_token(), login_response.player_id()),
+                                                &active_battle_request);
+    if (!Require(active_battle_call.ok,
+                 "get active battle failed: " + FormatError(active_battle_call.error_code, active_battle_call.error_message))) {
+        return 1;
+    }
+
+    game_backend::proto::GetActiveBattleResponse active_battle_response;
+    if (!Require(common::net::ParseMessage(active_battle_call.packet.body, &active_battle_response),
+                 "failed to parse get active battle response") ||
+        !Require(active_battle_response.found(), "get active battle should return current active session") ||
+        !Require(active_battle_response.session_id() == enter_response.session_id(),
+                 "get active battle should return the same session_id as enter battle")) {
+        return 1;
+    }
+
     game_backend::proto::SettleBattleRequest settle_request;
     settle_request.set_player_id(login_response.player_id());
     settle_request.set_session_id(enter_response.session_id());
@@ -578,6 +660,7 @@ int main(int argc, char* argv[]) {
     settle_request.set_star(3);
     settle_request.set_result_code(1);
     settle_request.set_client_score(123456);
+    settle_request.set_settle_token(enter_response.settle_token());
     const auto settle_call = SendMessage(*active_client,
                                          common::net::MessageId::kSettleBattleRequest,
                                          BuildContext(request_id++, login_response.auth_token(), login_response.player_id()),
@@ -600,29 +683,31 @@ int main(int argc, char* argv[]) {
     EmitToolLog(common::log::LogLevel::kInfo, settle_entry);
     LogRewards(settle_response.reward_preview());
 
-    game_backend::proto::GetRewardGrantStatusRequest grant_request;
-    grant_request.set_player_id(login_response.player_id());
-    grant_request.set_reward_grant_id(settle_response.reward_grant_id());
-    const auto grant_call = SendMessage(*active_client,
-                                        common::net::MessageId::kGetRewardGrantStatusRequest,
-                                        BuildContext(request_id++, login_response.auth_token(), login_response.player_id()),
-                                        &grant_request);
-    if (!Require(grant_call.ok, "get reward grant status failed: " +
-                                    FormatError(grant_call.error_code, grant_call.error_message))) {
-        return 1;
-    }
+    if (options.run_negative_cases) {
+        game_backend::proto::GetRewardGrantStatusRequest grant_request;
+        grant_request.set_player_id(login_response.player_id());
+        grant_request.set_reward_grant_id(settle_response.reward_grant_id());
+        const auto grant_call = SendMessage(*active_client,
+                                            common::net::MessageId::kGetRewardGrantStatusRequest,
+                                            BuildContext(request_id++, login_response.auth_token(), login_response.player_id()),
+                                            &grant_request);
+        if (!Require(grant_call.ok, "get reward grant status failed: " +
+                                        FormatError(grant_call.error_code, grant_call.error_message))) {
+            return 1;
+        }
 
-    game_backend::proto::GetRewardGrantStatusResponse grant_response;
-    if (!Require(common::net::ParseMessage(grant_call.packet.body, &grant_response),
-                 "failed to parse reward grant status response") ||
-        !Require(grant_response.grant_status() == 1, "reward grant should be completed synchronously")) {
-        return 1;
-    }
+        game_backend::proto::GetRewardGrantStatusResponse grant_response;
+        if (!Require(common::net::ParseMessage(grant_call.packet.body, &grant_response),
+                     "failed to parse reward grant status response") ||
+            !Require(grant_response.grant_status() == 1, "reward grant should be completed synchronously")) {
+            return 1;
+        }
 
-    auto grant_entry = NewToolEvent("demo_client_reward_grant_status_observed");
-    grant_entry.Add("reward_grant_id", grant_response.reward_grant_id());
-    grant_entry.Add("grant_status", static_cast<std::int64_t>(grant_response.grant_status()));
-    EmitToolLog(common::log::LogLevel::kInfo, grant_entry);
+        auto grant_entry = NewToolEvent("demo_client_reward_grant_status_observed");
+        grant_entry.Add("reward_grant_id", grant_response.reward_grant_id());
+        grant_entry.Add("grant_status", static_cast<std::int64_t>(grant_response.grant_status()));
+        EmitToolLog(common::log::LogLevel::kInfo, grant_entry);
+    }
 
     game_backend::proto::LoadPlayerRequest final_load_request;
     final_load_request.set_player_id(login_response.player_id());
@@ -638,6 +723,7 @@ int main(int argc, char* argv[]) {
     game_backend::proto::LoadPlayerResponse final_load_response;
     if (!Require(common::net::ParseMessage(final_load_call.packet.body, &final_load_response),
                  "failed to parse reload player response") ||
+        !Require(settle_response.grant_status() == 1, "settle battle should complete reward synchronously") ||
         !Require(final_load_response.player_state().profile().stamina() == enter_response.remain_stamina(),
                  "reload player should reflect stamina consumption") ||
         !Require(final_load_response.player_state().profile().gold() ==
@@ -645,9 +731,8 @@ int main(int argc, char* argv[]) {
                          stage_config.GetInt("demo.stage_normal_gold_reward", 100),
                  "reload player should reflect gold reward") ||
         !Require(final_load_response.player_state().profile().diamond() ==
-                     load_response.player_state().profile().diamond() +
-                         stage_config.GetInt("demo.stage_first_clear_diamond_reward", 50),
-                 "reload player should reflect diamond reward")) {
+                     load_response.player_state().profile().diamond(),
+                 "reload player should not mint diamond from client-reported star")) {
         return 1;
     }
 
@@ -712,6 +797,7 @@ int main(int argc, char* argv[]) {
         invalid_star_request.set_star(99);
         invalid_star_request.set_result_code(1);
         invalid_star_request.set_client_score(1);
+        invalid_star_request.set_settle_token(invalid_star_enter_response.settle_token());
         const auto invalid_star_call = SendMessage(*active_client,
                                                    common::net::MessageId::kSettleBattleRequest,
                                                    BuildContext(request_id++, login_response.auth_token(), login_response.player_id()),
@@ -727,6 +813,7 @@ int main(int argc, char* argv[]) {
         cleanup_settle_request.set_star(1);
         cleanup_settle_request.set_result_code(1);
         cleanup_settle_request.set_client_score(654321);
+        cleanup_settle_request.set_settle_token(invalid_star_enter_response.settle_token());
         const auto cleanup_settle_call = SendMessage(*active_client,
                                                      common::net::MessageId::kSettleBattleRequest,
                                                      BuildContext(request_id++, login_response.auth_token(), login_response.player_id()),

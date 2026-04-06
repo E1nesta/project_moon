@@ -11,7 +11,9 @@ wait_for_log_pattern() {
 
   local attempt
   for attempt in $(seq 1 10); do
-    if compose_cmd logs "$@" --since "$LOG_WINDOW" | grep -q "$pattern"; then
+    local logs
+    logs="$(compose_cmd logs --since "$LOG_WINDOW" "$@" 2>/dev/null || true)"
+    if grep -q "$pattern" <<<"$logs"; then
       return 0
     fi
     sleep 1

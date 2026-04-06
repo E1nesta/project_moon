@@ -9,7 +9,22 @@ namespace {
 
 class InMemoryPlayerCacheRepository final : public game_server::player::PlayerCacheRepository {
 public:
+    void SetSaveShouldSucceed(bool value) {
+        save_should_succeed_ = value;
+    }
+
+    void SetInvalidateShouldSucceed(bool value) {
+        invalidate_should_succeed_ = value;
+    }
+
+    void Prime(const common::model::PlayerState& player_state) {
+        cache_[player_state.profile.player_id] = player_state;
+    }
+
     bool Save(const common::model::PlayerState& player_state) override {
+        if (!save_should_succeed_) {
+            return false;
+        }
         cache_[player_state.profile.player_id] = player_state;
         return true;
     }
@@ -23,12 +38,17 @@ public:
     }
 
     bool Invalidate(std::int64_t player_id) override {
+        if (!invalidate_should_succeed_) {
+            return false;
+        }
         cache_.erase(player_id);
         return true;
     }
 
 private:
     std::unordered_map<std::int64_t, common::model::PlayerState> cache_;
+    bool save_should_succeed_ = true;
+    bool invalidate_should_succeed_ = true;
 };
 
 bool Expect(bool condition, const std::string& message) {
@@ -86,6 +106,8 @@ int main() {
     if (!Expect(second_load.loaded_from_cache, "expected second load to hit cache")) {
         return 1;
     }
+
+    cache_repository.SetInvalidateShouldSucceed(false);
 
     const auto missing_player = player_service.LoadPlayer(99999);
     if (!Expect(!missing_player.success, "expected missing player load to fail")) {
@@ -154,9 +176,39 @@ int main() {
     if (!Expect(reloaded.success, "expected reload after reward grant to succeed")) {
         return 1;
     }
+    if (!Expect(reloaded.loaded_from_cache, "expected reload after reward grant to use refreshed cache")) {
+        return 1;
+    }
     if (!Expect(reloaded.player_state.profile.stamina == 110 && reloaded.player_state.profile.gold == 1100 &&
                     reloaded.player_state.profile.diamond == 150,
                 "expected reload to reflect synchronous stamina and reward changes")) {
+        return 1;
+    }
+
+    auto fallback_player_repository = game_server::player::InMemoryPlayerRepository::FromConfig(config);
+    InMemoryPlayerCacheRepository fallback_cache_repository;
+    game_server::player::PlayerService fallback_player_service(fallback_player_repository, fallback_cache_repository);
+
+    const auto fallback_first_load = fallback_player_service.LoadPlayer(20001);
+    if (!Expect(fallback_first_load.success && !fallback_first_load.loaded_from_cache,
+                "expected fallback service first load to succeed from storage")) {
+        return 1;
+    }
+    fallback_cache_repository.SetSaveShouldSucceed(false);
+
+    const auto fallback_spend =
+        fallback_player_service.PrepareBattleEntry(20001, session_id + 100, 10, "battle-enter:20001:2000110111");
+    if (!Expect(fallback_spend.success, "expected fallback spend stamina to succeed")) {
+        return 1;
+    }
+
+    const auto fallback_reload = fallback_player_service.LoadPlayer(20001);
+    if (!Expect(fallback_reload.success && !fallback_reload.loaded_from_cache,
+                "expected fallback reload to miss cache after save failure")) {
+        return 1;
+    }
+    if (!Expect(fallback_reload.player_state.profile.stamina == 110,
+                "expected fallback reload to observe latest stamina from storage")) {
         return 1;
     }
 

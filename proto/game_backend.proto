@@ -122,6 +122,7 @@ message EnterBattleResponse {
   int64 session_id = 6;
   int32 remain_stamina = 7;
   int64 seed = 8;
+  string settle_token = 9;
 }
 
 message SettleBattleRequest {
@@ -132,6 +133,7 @@ message SettleBattleRequest {
   int32 star = 5;
   int32 result_code = 6;
   int64 client_score = 7;
+  string settle_token = 8;
 }
 
 message SettleBattleResponse {
@@ -153,4 +155,20 @@ message GetRewardGrantStatusResponse {
   int64 reward_grant_id = 2;
   int32 grant_status = 3;
   repeated Reward granted_rewards = 4;
+}
+
+message GetActiveBattleRequest {
+  RequestContext context = 1;
+  int64 player_id = 2;
+}
+
+message GetActiveBattleResponse {
+  ResponseContext context = 1;
+  bool found = 2;
+  int64 session_id = 3;
+  int32 stage_id = 4;
+  string mode = 5;
+  int32 remain_stamina = 6;
+  int64 seed = 7;
+  string settle_token = 8;
 }

@@ -320,6 +320,7 @@ std::string DescribeUpstreamService(common::net::MessageId message_id) {
         return "player";
     case common::net::MessageId::kEnterBattleRequest:
     case common::net::MessageId::kSettleBattleRequest:
+    case common::net::MessageId::kGetActiveBattleRequest:
     case common::net::MessageId::kGetRewardGrantStatusRequest:
         return "battle";
     default:

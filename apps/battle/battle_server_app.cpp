@@ -7,9 +7,15 @@
 
 #include "game_backend.pb.h"
 
+#include <functional>
+
 namespace services::battle {
 
 namespace {
+
+bool RequestPlayerMatchesContext(const framework::protocol::HandlerContext& context, std::int64_t request_player_id) {
+    return request_player_id == 0 || request_player_id == context.request.player_id;
+}
 
 bool UseInternalGrpcMtls(const common::config::SimpleConfig& config) {
     const auto environment = config.GetString("runtime.environment", "local");
@@ -23,6 +29,18 @@ framework::grpc::TlsChannelOptions BuildInternalGrpcTlsOptions() {
     options.private_key_file = "/etc/game_backend/tls/battle_server.key";
     options.server_name = "player_internal_grpc_server";
     return options;
+}
+
+std::uint16_t BuildIdGeneratorNodeId(const common::config::SimpleConfig& config) {
+    const auto instance_id = config.GetString("service.instance_id", config.GetString("service.name", "battle_server"));
+    const auto hashed = std::hash<std::string>{}(instance_id);
+    return static_cast<std::uint16_t>((hashed % 1023U) + 1U);
+}
+
+std::string BuildSettleTokenSecret(const common::config::SimpleConfig& config) {
+    return config.GetString(
+        "security.settle_token.secret",
+        config.GetString("security.trusted_gateway.shared_secret", "battle-settle-token"));
 }
 
 void FillProtoReward(const common::model::Reward& reward, game_backend::proto::Reward* output) {
@@ -40,6 +58,7 @@ common::net::Packet BuildEnterBattleResponsePacket(const framework::protocol::Ha
     response.set_session_id(result.session_id);
     response.set_remain_stamina(result.remain_stamina);
     response.set_seed(result.seed);
+    response.set_settle_token(result.settle_token);
     return common::net::BuildPacket(common::net::MessageId::kEnterBattleResponse, context.request.request_id, response);
 }
 
@@ -67,6 +86,23 @@ common::net::Packet BuildGetRewardGrantStatusResponsePacket(
     }
     return common::net::BuildPacket(
         common::net::MessageId::kGetRewardGrantStatusResponse, context.request.request_id, response);
+}
+
+common::net::Packet BuildGetActiveBattleResponsePacket(
+    const framework::protocol::HandlerContext& context,
+    const battle_server::battle::ActiveBattleResponse& result) {
+    game_backend::proto::GetActiveBattleResponse response;
+    framework::protocol::FillResponseContext(context.request, &response);
+    response.set_found(result.found);
+    if (result.found) {
+        response.set_session_id(result.session_id);
+        response.set_stage_id(result.stage_id);
+        response.set_mode(result.mode);
+        response.set_remain_stamina(result.remain_stamina);
+        response.set_seed(result.seed);
+        response.set_settle_token(result.settle_token);
+    }
+    return common::net::BuildPacket(common::net::MessageId::kGetActiveBattleResponse, context.request.request_id, response);
 }
 
 }  // namespace
@@ -114,7 +150,9 @@ bool BattleServerApp::BuildDependencies(std::string* error_message) {
         *player_snapshot_port_,
         *stage_config_repository_,
         *battle_repository_,
-        *battle_context_repository_);
+        *battle_context_repository_,
+        BuildIdGeneratorNodeId(Config()),
+        BuildSettleTokenSecret(Config()));
     return true;
 }
 
@@ -127,6 +165,10 @@ void BattleServerApp::RegisterRoutes() {
                       [this](const framework::protocol::HandlerContext& context, const common::net::Packet& packet) {
                           return HandleSettleBattleRequest(context, packet);
                       });
+    Routes().Register(common::net::MessageId::kGetActiveBattleRequest,
+                      [this](const framework::protocol::HandlerContext& context, const common::net::Packet& packet) {
+                          return HandleGetActiveBattleRequest(context, packet);
+                      });
     Routes().Register(common::net::MessageId::kGetRewardGrantStatusRequest,
                       [this](const framework::protocol::HandlerContext& context, const common::net::Packet& packet) {
                           return HandleGetRewardGrantStatusRequest(context, packet);
@@ -135,16 +177,29 @@ void BattleServerApp::RegisterRoutes() {
 
 common::net::Packet BattleServerApp::HandleEnterBattleRequest(const framework::protocol::HandlerContext& context,
                                                                const common::net::Packet& packet) const {
-    return framework::protocol::HandleParsedRequest<game_backend::proto::EnterBattleRequest>(
-        context,
-        packet,
-        "invalid enter battle request",
-        [this, &context](const game_backend::proto::EnterBattleRequest& request) {
-            return battle_service_->EnterBattle(
-                {context.request.player_id, request.stage_id(), request.mode().empty() ? "pve" : request.mode()},
-                context.request.trace_id);
-        },
-        BuildEnterBattleResponsePacket);
+    game_backend::proto::EnterBattleRequest request;
+    common::net::Packet error_response;
+    if (!framework::protocol::ParseProtoRequest(
+            context, packet, "invalid enter battle request", &request, &error_response)) {
+        return error_response;
+    }
+    if (!RequestPlayerMatchesContext(context, request.player_id())) {
+        return framework::protocol::BuildErrorResponse(
+            context.request,
+            common::error::ErrorCode::kRequestContextInvalid,
+            "request player_id does not match authenticated session");
+    }
+
+    const auto result = battle_service_->EnterBattle(
+        {context.request.player_id,
+         context.request.request_id,
+         request.stage_id(),
+         request.mode().empty() ? "pve" : request.mode()},
+        context.request.trace_id);
+    if (!result.success) {
+        return framework::protocol::BuildErrorResponse(context.request, result.error_code, result.error_message);
+    }
+    return BuildEnterBattleResponsePacket(context, result);
 }
 
 common::net::Packet BattleServerApp::HandleSettleBattleRequest(const framework::protocol::HandlerContext& context,
@@ -155,13 +210,20 @@ common::net::Packet BattleServerApp::HandleSettleBattleRequest(const framework::
             context, packet, "invalid settle battle request", &request, &error_response)) {
         return error_response;
     }
+    if (!RequestPlayerMatchesContext(context, request.player_id())) {
+        return framework::protocol::BuildErrorResponse(
+            context.request,
+            common::error::ErrorCode::kRequestContextInvalid,
+            "request player_id does not match authenticated session");
+    }
 
     auto result = battle_service_->SettleBattle({context.request.player_id,
                                                   request.session_id(),
                                                   request.stage_id(),
                                                   request.star(),
                                                   request.result_code(),
-                                                  request.client_score()},
+                                                  request.client_score(),
+                                                  request.settle_token()},
                                                  context.request.trace_id);
     if (!result.success) {
         return framework::protocol::BuildErrorResponse(context.request, result.error_code, result.error_message);
@@ -170,17 +232,49 @@ common::net::Packet BattleServerApp::HandleSettleBattleRequest(const framework::
     return BuildSettleBattleResponsePacket(context, result);
 }
 
+common::net::Packet BattleServerApp::HandleGetActiveBattleRequest(const framework::protocol::HandlerContext& context,
+                                                                  const common::net::Packet& packet) const {
+    game_backend::proto::GetActiveBattleRequest request;
+    common::net::Packet error_response;
+    if (!framework::protocol::ParseProtoRequest(
+            context, packet, "invalid get active battle request", &request, &error_response)) {
+        return error_response;
+    }
+    if (!RequestPlayerMatchesContext(context, request.player_id())) {
+        return framework::protocol::BuildErrorResponse(
+            context.request,
+            common::error::ErrorCode::kRequestContextInvalid,
+            "request player_id does not match authenticated session");
+    }
+
+    const auto result = battle_service_->GetActiveBattle(context.request.player_id);
+    if (!result.success) {
+        return framework::protocol::BuildErrorResponse(context.request, result.error_code, result.error_message);
+    }
+    return BuildGetActiveBattleResponsePacket(context, result);
+}
+
 common::net::Packet BattleServerApp::HandleGetRewardGrantStatusRequest(
     const framework::protocol::HandlerContext& context,
     const common::net::Packet& packet) const {
-    return framework::protocol::HandleParsedRequest<game_backend::proto::GetRewardGrantStatusRequest>(
-        context,
-        packet,
-        "invalid get reward grant status request",
-        [this](const game_backend::proto::GetRewardGrantStatusRequest& request) {
-            return battle_service_->GetRewardGrantStatus(request.reward_grant_id());
-        },
-        BuildGetRewardGrantStatusResponsePacket);
+    game_backend::proto::GetRewardGrantStatusRequest request;
+    common::net::Packet error_response;
+    if (!framework::protocol::ParseProtoRequest(
+            context, packet, "invalid get reward grant status request", &request, &error_response)) {
+        return error_response;
+    }
+    if (!RequestPlayerMatchesContext(context, request.player_id())) {
+        return framework::protocol::BuildErrorResponse(
+            context.request,
+            common::error::ErrorCode::kRequestContextInvalid,
+            "request player_id does not match authenticated session");
+    }
+
+    const auto result = battle_service_->GetRewardGrantStatus(context.request.player_id, request.reward_grant_id());
+    if (!result.success) {
+        return framework::protocol::BuildErrorResponse(context.request, result.error_code, result.error_message);
+    }
+    return BuildGetRewardGrantStatusResponsePacket(context, result);
 }
 
 }  // namespace services::battle

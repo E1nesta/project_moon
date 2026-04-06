@@ -167,6 +167,20 @@ bool ValidateProtoRequest(MessageId message_id,
 
 }  // namespace
 
+template <typename ProtoResponse>
+bool ExtractProtoResponseContext(const std::string& body, RequestContext* context) {
+    if (context == nullptr) {
+        return false;
+    }
+
+    ProtoResponse response;
+    if (!ParseMessage(body, &response)) {
+        return false;
+    }
+    *context = FromProto(response.context());
+    return true;
+}
+
 RequestContext FromProto(const game_backend::proto::RequestContext& context) {
     RequestContext output;
     output.trace_id = context.trace_id();
@@ -261,6 +275,14 @@ bool RewriteRequestContext(MessageId message_id, const RequestContext& context, 
                 FillProto(context, proto_context);
             });
     }
+    case MessageId::kGetActiveBattleRequest: {
+        return RewriteProtoRequest<game_backend::proto::GetActiveBattleRequest>(
+            message_id,
+            packet,
+            [&context](game_backend::proto::RequestContext* proto_context, game_backend::proto::GetActiveBattleRequest*) {
+                FillProto(context, proto_context);
+            });
+    }
     case MessageId::kGetRewardGrantStatusRequest: {
         return RewriteProtoRequest<game_backend::proto::GetRewardGrantStatusRequest>(
             message_id,
@@ -300,6 +322,9 @@ bool SignTrustedRequest(MessageId message_id,
     case MessageId::kSettleBattleRequest:
         return SignProtoRequest<game_backend::proto::SettleBattleRequest>(
             message_id, gateway_timestamp_ms, shared_secret, packet, error_message);
+    case MessageId::kGetActiveBattleRequest:
+        return SignProtoRequest<game_backend::proto::GetActiveBattleRequest>(
+            message_id, gateway_timestamp_ms, shared_secret, packet, error_message);
     case MessageId::kGetRewardGrantStatusRequest:
         return SignProtoRequest<game_backend::proto::GetRewardGrantStatusRequest>(
             message_id, gateway_timestamp_ms, shared_secret, packet, error_message);
@@ -328,6 +353,9 @@ bool ValidateTrustedRequest(MessageId message_id,
             message_id, max_clock_skew_ms, shared_secret, packet, error_message);
     case MessageId::kSettleBattleRequest:
         return ValidateProtoRequest<game_backend::proto::SettleBattleRequest>(
+            message_id, max_clock_skew_ms, shared_secret, packet, error_message);
+    case MessageId::kGetActiveBattleRequest:
+        return ValidateProtoRequest<game_backend::proto::GetActiveBattleRequest>(
             message_id, max_clock_skew_ms, shared_secret, packet, error_message);
     case MessageId::kGetRewardGrantStatusRequest:
         return ValidateProtoRequest<game_backend::proto::GetRewardGrantStatusRequest>(
@@ -384,10 +412,37 @@ bool ExtractRequestContext(MessageId message_id, const std::string& body, Reques
         game_backend::proto::SettleBattleRequest request;
         return ParseMessage(body, &request) && (*context = FromProto(request.context()), true);
     }
+    case MessageId::kGetActiveBattleRequest: {
+        game_backend::proto::GetActiveBattleRequest request;
+        return ParseMessage(body, &request) && (*context = FromProto(request.context()), true);
+    }
     case MessageId::kGetRewardGrantStatusRequest: {
         game_backend::proto::GetRewardGrantStatusRequest request;
         return ParseMessage(body, &request) && (*context = FromProto(request.context()), true);
     }
+    default:
+        return false;
+    }
+}
+
+bool ExtractResponseContext(MessageId message_id, const std::string& body, RequestContext* context) {
+    switch (message_id) {
+    case MessageId::kPingResponse:
+        return ExtractProtoResponseContext<game_backend::proto::PingResponse>(body, context);
+    case MessageId::kErrorResponse:
+        return ExtractProtoResponseContext<game_backend::proto::ErrorResponse>(body, context);
+    case MessageId::kLoginResponse:
+        return ExtractProtoResponseContext<game_backend::proto::LoginResponse>(body, context);
+    case MessageId::kLoadPlayerResponse:
+        return ExtractProtoResponseContext<game_backend::proto::LoadPlayerResponse>(body, context);
+    case MessageId::kEnterBattleResponse:
+        return ExtractProtoResponseContext<game_backend::proto::EnterBattleResponse>(body, context);
+    case MessageId::kSettleBattleResponse:
+        return ExtractProtoResponseContext<game_backend::proto::SettleBattleResponse>(body, context);
+    case MessageId::kGetRewardGrantStatusResponse:
+        return ExtractProtoResponseContext<game_backend::proto::GetRewardGrantStatusResponse>(body, context);
+    case MessageId::kGetActiveBattleResponse:
+        return ExtractProtoResponseContext<game_backend::proto::GetActiveBattleResponse>(body, context);
     default:
         return false;
     }

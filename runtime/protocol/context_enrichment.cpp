@@ -54,6 +54,17 @@ bool ExtractPlayerIdFromBody(common::net::MessageId message_id,
         *player_id = request.player_id();
         return true;
     }
+    case common::net::MessageId::kGetActiveBattleRequest: {
+        game_backend::proto::GetActiveBattleRequest request;
+        if (!common::net::ParseMessage(packet.body, &request)) {
+            if (error_message != nullptr) {
+                *error_message = "invalid get active battle request";
+            }
+            return false;
+        }
+        *player_id = request.player_id();
+        return true;
+    }
     case common::net::MessageId::kGetRewardGrantStatusRequest: {
         game_backend::proto::GetRewardGrantStatusRequest request;
         if (!common::net::ParseMessage(packet.body, &request)) {

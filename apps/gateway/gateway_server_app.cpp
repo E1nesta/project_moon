@@ -342,17 +342,23 @@ void GatewayServerApp::ForwardGatewayRequest(common::net::MessageId message_id,
             if (maybe_validated_message_id.has_value() &&
                 *maybe_validated_message_id == common::net::MessageId::kErrorResponse) {
                 std::string detail = "upstream response validation failed";
+                auto error_code = framework::observability::LogErrorCode::kUpstreamResponseInvalid;
                 game_backend::proto::ErrorResponse error_response;
-                if (common::net::ParseMessage(validated_response.body, &error_response) &&
-                    !error_response.error_message().empty()) {
-                    detail = error_response.error_message();
+                if (common::net::ParseMessage(validated_response.body, &error_response)) {
+                    if (!error_response.error_message().empty()) {
+                        detail = error_response.error_message();
+                    }
+                    if (error_response.error_code() !=
+                        static_cast<std::int32_t>(common::error::ErrorCode::kUpstreamResponseInvalid)) {
+                        error_code = framework::observability::LogErrorCode::kUpstreamRequestFailed;
+                    }
                 }
                 LogGatewayEvent(log_context,
                                 common::log::LogLevel::kWarn,
                                 framework::observability::LogEvent::kGatewayForwardFailed,
                                 instance_id_,
                                 upstream_service,
-                                framework::observability::LogErrorCode::kUpstreamResponseInvalid,
+                                error_code,
                                 detail,
                                 latency_ms.count());
                 response_callback(std::move(validated_response));

@@ -13,7 +13,7 @@ class GrpcPlayerSnapshotPort final : public PlayerSnapshotPort {
 public:
     explicit GrpcPlayerSnapshotPort(std::shared_ptr<::grpc::Channel> channel);
 
-    [[nodiscard]] std::optional<PlayerSnapshot> GetBattleEntrySnapshot(std::int64_t player_id) const override;
+    [[nodiscard]] GetBattleEntrySnapshotPortResponse GetBattleEntrySnapshot(std::int64_t player_id) const override;
     bool InvalidatePlayerSnapshot(std::int64_t player_id) override;
     [[nodiscard]] PrepareBattleEntryPortResponse PrepareBattleEntry(std::int64_t player_id,
                                                                     std::int64_t session_id,

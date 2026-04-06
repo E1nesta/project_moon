@@ -17,6 +17,8 @@ std::optional<MessagePolicy> MessagePolicyRegistry::Find(common::net::MessageId 
         return MessagePolicy{true, true, true, ExecutionKeyKind::kPlayer, MessageId::kEnterBattleResponse};
     case MessageId::kSettleBattleRequest:
         return MessagePolicy{true, true, true, ExecutionKeyKind::kPlayer, MessageId::kSettleBattleResponse};
+    case MessageId::kGetActiveBattleRequest:
+        return MessagePolicy{true, true, true, ExecutionKeyKind::kPlayer, MessageId::kGetActiveBattleResponse};
     case MessageId::kGetRewardGrantStatusRequest:
         return MessagePolicy{true, true, true, ExecutionKeyKind::kPlayer, MessageId::kGetRewardGrantStatusResponse};
     default:

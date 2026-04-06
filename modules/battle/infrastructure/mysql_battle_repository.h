@@ -20,6 +20,23 @@ public:
     ~MySqlBattleRepository() override = default;
 
     [[nodiscard]] std::optional<common::model::BattleContext> FindBattleById(std::int64_t session_id) const override;
+    [[nodiscard]] std::optional<BattleEntryOperation> FindBattleEntryOperationByIdempotencyKey(
+        const std::string& idempotency_key) const override;
+    [[nodiscard]] bool CreateBattleEntryOperation(std::int64_t player_id,
+                                                  int stage_id,
+                                                  const std::string& mode,
+                                                  std::int64_t session_id,
+                                                  std::int64_t seed,
+                                                  const std::string& idempotency_key,
+                                                  std::string* error_message = nullptr) override;
+    [[nodiscard]] bool MarkBattleEntryOperationRolledBack(const std::string& idempotency_key,
+                                                          std::string* error_message = nullptr) override;
+    [[nodiscard]] bool MarkBattleEntryOperationFailed(const std::string& idempotency_key,
+                                                      common::error::ErrorCode error_code,
+                                                      const std::string& error_message,
+                                                      std::string* storage_error_message = nullptr) override;
+    [[nodiscard]] std::optional<common::model::BattleContext> FindUnsettledBattleByIdempotencyKey(
+        const std::string& idempotency_key) const override;
     [[nodiscard]] std::optional<common::model::BattleContext> FindUnsettledBattleByPlayerId(
         std::int64_t player_id) const override;
     [[nodiscard]] EnterBattleResult CreateBattleSession(std::int64_t session_id,
@@ -43,14 +60,16 @@ public:
                                                             const std::vector<common::model::Reward>& rewards,
                                                             const std::string& idempotency_key) override;
     [[nodiscard]] SettleBattleResult MarkRewardGrantGranted(std::int64_t reward_grant_id) override;
-    [[nodiscard]] RewardGrantStatusResult GetRewardGrantStatus(std::int64_t reward_grant_id) const override;
+    [[nodiscard]] RewardGrantStatusResult GetRewardGrantStatus(std::int64_t player_id,
+                                                               std::int64_t reward_grant_id) const override;
 
 private:
-    [[nodiscard]] static std::string CurrentMonthSuffix();
-    [[nodiscard]] static std::string SessionTable();
-    [[nodiscard]] static std::string TeamSnapshotTable();
-    [[nodiscard]] static std::string ResultTable();
-    [[nodiscard]] static std::string RewardGrantTable();
+    [[nodiscard]] static std::string EnterOperationTable();
+    [[nodiscard]] static std::string ActiveSessionTable();
+    [[nodiscard]] static std::string SessionTable(const std::string& month_suffix);
+    [[nodiscard]] static std::string TeamSnapshotTable(const std::string& month_suffix);
+    [[nodiscard]] static std::string ResultTable(const std::string& month_suffix);
+    [[nodiscard]] static std::string RewardGrantTable(const std::string& month_suffix);
 
     common::mysql::MySqlClientPool* mysql_pool_ = nullptr;
     common::mysql::MySqlClient* mysql_client_ = nullptr;

@@ -11,6 +11,14 @@
 
 namespace battle_server::battle {
 
+struct GetBattleEntrySnapshotPortResponse {
+    bool success = false;
+    bool found = false;
+    common::error::ErrorCode error_code = common::error::ErrorCode::kOk;
+    std::string error_message;
+    PlayerSnapshot snapshot;
+};
+
 struct PrepareBattleEntryPortResponse {
     bool success = false;
     common::error::ErrorCode error_code = common::error::ErrorCode::kOk;
@@ -35,7 +43,7 @@ class PlayerSnapshotPort {
 public:
     virtual ~PlayerSnapshotPort() = default;
 
-    [[nodiscard]] virtual std::optional<PlayerSnapshot> GetBattleEntrySnapshot(std::int64_t player_id) const = 0;
+    [[nodiscard]] virtual GetBattleEntrySnapshotPortResponse GetBattleEntrySnapshot(std::int64_t player_id) const = 0;
     virtual bool InvalidatePlayerSnapshot(std::int64_t player_id) = 0;
     [[nodiscard]] virtual PrepareBattleEntryPortResponse PrepareBattleEntry(std::int64_t player_id,
                                                                             std::int64_t session_id,

@@ -120,10 +120,16 @@ PrepareBattleEntryResult MySqlPlayerRepository::PrepareBattleEntry(std::int64_t 
     bool ok = false;
     do {
         std::ostringstream check_sql;
-        check_sql << "SELECT after_amount FROM " << CurrencyTxnTable(player_id) << " WHERE player_id = " << player_id
-                  << " AND currency_type = 'energy' AND idempotency_key = '"
+        check_sql << "SELECT txn_id, ref_id, delta_amount, after_amount FROM " << CurrencyTxnTable(player_id)
+                  << " WHERE player_id = " << player_id << " AND currency_type = 'energy' AND idempotency_key = '"
                   << EscapeString(*mysql, CurrencyIdempotencyKey(idempotency_key, "energy")) << "' LIMIT 1";
         if (const auto row = mysql->QueryOne(check_sql.str(), &error_message); row.has_value()) {
+            const auto expected_delta = -energy_cost;
+            if (std::stoll(row->at("txn_id")) != session_id || row->at("ref_id") != std::to_string(session_id) ||
+                std::stoll(row->at("delta_amount")) != expected_delta) {
+                result = {false, 0, PlayerMutationError::kBattleMismatch, "battle entry request mismatch"};
+                break;
+            }
             result = {true, std::stoi(row->at("after_amount")), PlayerMutationError::kNone, ""};
             ok = true;
             break;
@@ -214,11 +220,22 @@ CancelBattleEntryResult MySqlPlayerRepository::CancelBattleEntry(std::int64_t pl
             break;
         }
 
+        std::ostringstream balance_sql;
+        balance_sql << "SELECT energy FROM " << ProfileTable(player_id) << " WHERE player_id = " << player_id << " LIMIT 1";
+        const auto balance_row = mysql->QueryOne(balance_sql.str(), &error_message);
+        if (!balance_row.has_value()) {
+            result = {false, PlayerMutationError::kStorageFailure, "player not found after refund"};
+            break;
+        }
+        const auto after_energy = std::stoi(balance_row->at("energy"));
+        const auto before_energy = after_energy - energy_refund;
+
         std::ostringstream insert_sql;
         insert_sql << "INSERT INTO " << CurrencyTxnTable(player_id)
                    << " (txn_id, player_id, currency_type, delta_amount, before_amount, after_amount, reason_code, ref_type, "
                       "ref_id, idempotency_key, created_at) VALUES ("
-                   << (session_id + 1) << ", " << player_id << ", 'energy', " << energy_refund << ", 0, 0, "
+                   << (session_id + 1) << ", " << player_id << ", 'energy', " << energy_refund << ", "
+                   << before_energy << ", " << after_energy << ", "
                    << "'battle_cancel', 'battle_session', '" << session_id << "', '"
                    << EscapeString(*mysql, CurrencyIdempotencyKey(idempotency_key, "energy")) << "', CURRENT_TIMESTAMP(3))";
         if (!mysql->Execute(insert_sql.str(), &error_message)) {
@@ -257,12 +274,20 @@ ApplyRewardGrantResult MySqlPlayerRepository::ApplyRewardGrant(std::int64_t play
     do {
         for (const auto& reward : rewards) {
             std::ostringstream check_sql;
-            check_sql << "SELECT currency_type, after_amount FROM " << CurrencyTxnTable(player_id) << " WHERE player_id = "
-                      << player_id << " AND currency_type = '" << EscapeString(*mysql, reward.reward_type)
+            check_sql << "SELECT txn_id, currency_type, ref_id, delta_amount, after_amount FROM "
+                      << CurrencyTxnTable(player_id) << " WHERE player_id = " << player_id << " AND currency_type = '"
+                      << EscapeString(*mysql, reward.reward_type)
                       << "' AND idempotency_key = '"
                       << EscapeString(*mysql, CurrencyIdempotencyKey(idempotency_key, reward.reward_type))
                       << "' LIMIT 1";
             if (const auto existing = mysql->QueryOne(check_sql.str(), &error_message); existing.has_value()) {
+                const auto expected_txn_id = grant_id + (reward.reward_type == "diamond" ? 2 : 1);
+                if (std::stoll(existing->at("txn_id")) != expected_txn_id ||
+                    existing->at("ref_id") != std::to_string(session_id) ||
+                    std::stoll(existing->at("delta_amount")) != reward.amount) {
+                    result = {false, {}, PlayerMutationError::kBattleMismatch, "reward grant request mismatch"};
+                    break;
+                }
                 result.applied_currencies.push_back({existing->at("currency_type"), std::stoll(existing->at("after_amount"))});
                 continue;
             }
